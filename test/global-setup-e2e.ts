@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import { execSync } from 'child_process';
-import { OWNER_INVITATION_FILE } from './helpers/owner-invitation-file';
+import { OWNER_INVITATION_FILE, OWNER_SESSION_FILE } from './helpers/owner-invitation-file';
 
 /**
  * Jest `globalSetup` - runs ONCE in its own process before any test file, unlike `setupFiles`
@@ -15,6 +15,9 @@ export default async function globalSetup() {
 
     const composeFile = path.resolve(__dirname, '..', 'deploy', 'docker-compose.test.yml');
     const repoRoot = path.resolve(__dirname, '..');
+
+    // A session left over by a crashed run belongs to a database that no longer exists.
+    if (fs.existsSync(OWNER_SESSION_FILE)) fs.unlinkSync(OWNER_SESSION_FILE);
 
     console.log('[e2e] Starting test infra (Postgres + Redis)...');
     // `--wait` blocks until both services report healthy (see the healthcheck: blocks in

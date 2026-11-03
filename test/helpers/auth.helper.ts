@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { INestApplication } from '@nestjs/common';
 import * as fs from 'fs';
-import { OWNER_INVITATION_FILE } from './owner-invitation-file';
+import { OWNER_INVITATION_FILE, OWNER_SESSION_FILE } from './owner-invitation-file';
 import { generateTotpCode } from './totp.helper';
 
 /**
@@ -17,6 +17,13 @@ import { generateTotpCode } from './totp.helper';
  * console.log format changed) - see the error message below for how to fix it.
  */
 export async function bootstrapOwnerSession(app: INestApplication): Promise<{ accessToken: string }> {
+    // The invitation is single-use and shared by all spec files of the run: once one file has
+    // activated the owner, the others just reuse its access token (same JWT secret, same DB).
+    if (fs.existsSync(OWNER_SESSION_FILE)) {
+        const { accessToken } = JSON.parse(fs.readFileSync(OWNER_SESSION_FILE, 'utf-8'));
+        if (accessToken) return { accessToken };
+    }
+
     if (!fs.existsSync(OWNER_INVITATION_FILE)) {
         throw new Error(
             `${OWNER_INVITATION_FILE} not found - did test/global-setup-e2e.ts run? ` +
@@ -40,7 +47,10 @@ export async function bootstrapOwnerSession(app: INestApplication): Promise<{ ac
         .send({ email: workEmail, totpCode: await generateTotpCode(totpSecret) })
         .expect(200);
 
-    return { accessToken: confirmRes.body.accessToken };
+    const accessToken: string = confirmRes.body.accessToken;
+    fs.writeFileSync(OWNER_SESSION_FILE, JSON.stringify({ accessToken }), 'utf-8');
+
+    return { accessToken };
 }
 
 /**

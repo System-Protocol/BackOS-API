@@ -28,7 +28,14 @@ describe('Platform lifecycle (generate -> Docker start -> gateway call -> stop)'
     });
 
     it('generates, starts under Docker, serves a real request, and stops cleanly', async () => {
-        const authed = () => request(app.getHttpServer()).set('Authorization', `Bearer ${accessToken}`);
+        // supertest needs the HTTP verb BEFORE .set(): request(server).get(url).set(...).
+        // Each call builds a fresh request so the Authorization header is applied to every one.
+        const server = app.getHttpServer();
+        const bearer = `Bearer ${accessToken}`;
+        const authed = () => ({
+            get: (url: string) => request(server).get(url).set('Authorization', bearer),
+            post: (url: string) => request(server).post(url).set('Authorization', bearer),
+        });
 
         // 1. Create the platform (see src/platforms/dto/create-platform.dto.ts).
         const createRes = await authed()
