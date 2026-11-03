@@ -46,6 +46,17 @@ describe('Platform lifecycle (generate -> Docker start -> gateway call -> stop)'
         const slug: string = createRes.body.slug;
         expect(slug).toBeTruthy();
 
+        // 1b. A platform with no table cannot be generated ("This platform contains no active
+        // entities", see SchemaBuilderService.buildSchema), so give it one entity with one field.
+        const entityRes = await authed()
+            .post(`/api/platforms/${platformId}/entities`)
+            .send({ name: 'Player' })
+            .expect(201);
+        await authed()
+            .post(`/api/platforms/${platformId}/entities/${entityRes.body.id}/fields`)
+            .send({ name: 'nickname', type: 'STRING', required: true })
+            .expect(201);
+
         // 2. Trigger generation (queued to BullMQ - see generator.controller.ts) and poll the
         // platform's own status (DRAFT -> GENERATING -> ACTIVE, see generation.processor.ts)
         // until it finishes. Real `pnpm install` + `prisma migrate` inside the generated
@@ -54,8 +65,10 @@ describe('Platform lifecycle (generate -> Docker start -> gateway call -> stop)'
         await authed().post(`/api/platforms/${platformId}/generate`).expect(201);
         await pollUntil(
             async () => (await authed().get(`/api/platforms/${platformId}`).expect(200)).body.status,
-            (status) => status === 'ACTIVE' || status === 'DRAFT', // DRAFT would mean generation FAILED and reverted - see below
-            { attempts: 60, delayMs: 2000 },
+            // DRAFT is the state BEFORE the queued job starts, so it must not end the wait. A failed
+            // first generation ends in ERROR (see generation.processor.ts), never back in DRAFT.
+            (status) => status === 'ACTIVE' || status === 'ERROR',
+            { attempts: 90, delayMs: 2000 },
         );
         const afterGeneration = await authed().get(`/api/platforms/${platformId}`).expect(200);
         expect(afterGeneration.body.status).toBe('ACTIVE');
@@ -87,7 +100,7 @@ describe('Platform lifecycle (generate -> Docker start -> gateway call -> stop)'
             { attempts: 30, delayMs: 1000 },
         );
         await request(app.getHttpServer()).get(`/generated/${slug}/health`).expect(404);
-    });
+    }, 600_000); // generation (pnpm install + prisma migrate) + docker run: far above the 120s default
 });
 
 async function pollUntil<T>(
