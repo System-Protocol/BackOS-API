@@ -43,9 +43,14 @@ services:
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-app_test_runtime}
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-app_test_runtime}
       
-    # Binds port exclusively to local localhost interface (127.0.0.1) to avoid public exposure
+    # Binds the port to loopback (127.0.0.1) by default to avoid any exposure.
+    # BUT a generated backend runs in its OWN Docker container and reaches this database through
+    # `host.docker.internal` (the Docker bridge gateway, e.g. 172.17.0.1), where a loopback-only
+    # port is NOT reachable. Tests that start generated backends under Docker (see
+    # test/platform-lifecycle.e2e-spec.ts) therefore need POSTGRES_TEST_BIND=0.0.0.0 - the CI sets
+    # it on its throwaway runner; do the same locally only on a trusted network.
     ports:
-      - "127.0.0.1:${POSTGRES_TEST_PORT:-5433}:5432"
+      - "${POSTGRES_TEST_BIND:-127.0.0.1}:${POSTGRES_TEST_PORT:-5433}:5432"
       
     volumes:
       - ../docker/postgres-init:/docker-entrypoint-initdb.d:ro # Mounts initialization scripts read-only

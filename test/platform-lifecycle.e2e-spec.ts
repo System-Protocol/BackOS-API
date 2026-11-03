@@ -46,6 +46,25 @@ describe('Platform lifecycle (generate -> Docker start -> gateway call -> stop)'
         const slug: string = createRes.body.slug;
         expect(slug).toBeTruthy();
 
+        // Appended to every failure below: a bare "gave up after N attempts" says nothing about
+        // WHY the generation or the container did not come up.
+        const diagnostics = async (): Promise<string> => {
+            const parts: string[] = [];
+            try {
+                const generations = await authed().get(`/api/platforms/${platformId}/generations`);
+                parts.push(`generations: ${JSON.stringify(generations.body).slice(0, 3000)}`);
+            } catch {
+                // best effort only
+            }
+            try {
+                const runtime = await authed().get(`/api/platforms/${platformId}/runtime/logs?lines=100`);
+                parts.push(`runtime logs:\n${String(runtime.body.logs)}`);
+            } catch {
+                // best effort only
+            }
+            return parts.join('\n');
+        };
+
         // 1b. A platform with no table cannot be generated ("This platform contains no active
         // entities", see SchemaBuilderService.buildSchema), so give it one entity with one field.
         const entityRes = await authed()
@@ -63,13 +82,16 @@ describe('Platform lifecycle (generate -> Docker start -> gateway call -> stop)'
         // project, so this is genuinely slow - the 120s default testTimeout in jest-e2e.json
         // assumes a warm pnpm store; raise it if your first run is a cold cache.
         await authed().post(`/api/platforms/${platformId}/generate`).expect(201);
-        await pollUntil(
+        const generationStatus = await pollUntil(
             async () => (await authed().get(`/api/platforms/${platformId}`).expect(200)).body.status,
             // DRAFT is the state BEFORE the queued job starts, so it must not end the wait. A failed
             // first generation ends in ERROR (see generation.processor.ts), never back in DRAFT.
             (status) => status === 'ACTIVE' || status === 'ERROR',
-            { attempts: 90, delayMs: 2000 },
+            { attempts: 90, delayMs: 2000, diagnose: diagnostics },
         );
+        if (generationStatus !== 'ACTIVE') {
+            throw new Error(`Generation ended in status ${generationStatus}\n${await diagnostics()}`);
+        }
         const afterGeneration = await authed().get(`/api/platforms/${platformId}`).expect(200);
         expect(afterGeneration.body.status).toBe('ACTIVE');
 
@@ -77,11 +99,16 @@ describe('Platform lifecycle (generate -> Docker start -> gateway call -> stop)'
         // is exactly the flow debugged earlier in this conversation (Conflict/name-in-use race,
         // DATABASE_URL host rewrite), so a green result here is a real regression guard for both.
         await authed().post(`/api/platforms/${platformId}/runtime/start`).expect(201);
-        await pollUntil(
+        // The container needs time to boot (Node + Prisma client, 0.5 CPU / 256 MB limits) before
+        // its health endpoint answers: the Dockerfile HEALTHCHECK itself allows a 20s start period.
+        const startedStatus = await pollUntil(
             async () => (await authed().get(`/api/platforms/${platformId}/runtime/status`).expect(200)).body.status,
             (status) => status === 'RUNNING' || status === 'CRASHED',
-            { attempts: 30, delayMs: 1000 },
+            { attempts: 90, delayMs: 1000, diagnose: diagnostics },
         );
+        if (startedStatus !== 'RUNNING') {
+            throw new Error(`Runtime ended in status ${startedStatus}\n${await diagnostics()}`);
+        }
         const runtimeStatus = await authed().get(`/api/platforms/${platformId}/runtime/status`).expect(200);
         expect(runtimeStatus.body.status).toBe('RUNNING');
 
@@ -106,7 +133,7 @@ describe('Platform lifecycle (generate -> Docker start -> gateway call -> stop)'
 async function pollUntil<T>(
     read: () => Promise<T>,
     isDone: (value: T) => boolean,
-    { attempts, delayMs }: { attempts: number; delayMs: number },
+    { attempts, delayMs, diagnose }: { attempts: number; delayMs: number; diagnose?: () => Promise<string> },
 ): Promise<T> {
     let last: T;
     for (let i = 0; i < attempts; i++) {
@@ -114,5 +141,6 @@ async function pollUntil<T>(
         if (isDone(last)) return last;
         await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    throw new Error(`pollUntil() gave up after ${attempts} attempts. Last value: ${JSON.stringify(last!)}`);
+    const details = diagnose ? `\n${await diagnose()}` : '';
+    throw new Error(`pollUntil() gave up after ${attempts} attempts. Last value: ${JSON.stringify(last!)}${details}`);
 }

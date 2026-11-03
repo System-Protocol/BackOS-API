@@ -190,12 +190,25 @@ jobs:
 
       # Execute full stack end-to-end tests
       - name: Execute end-to-end integration suite
+        env:
+          # Generated backends run in Docker and reach the test Postgres through
+          # host.docker.internal (the Docker bridge gateway), not through 127.0.0.1. A port
+          # published on loopback only is unreachable from there, so on this throwaway runner it
+          # is published on all interfaces (see deploy/docker-compose.test.yml).
+          POSTGRES_TEST_BIND: "0.0.0.0"
         run: pnpm run test:e2e
 
       # Debugging helper: Print container logs if E2E tests fail
-      - name: Capture Docker Compose logs on job failure
+      - name: Capture Docker logs on job failure
         if: failure()              # Executes ONLY if a previous step failed
-        run: docker compose -f deploy/docker-compose.test.yml logs || true
+        run: |
+          docker compose -f deploy/docker-compose.test.yml logs || true
+          # Generated backends are plain containers outside the compose project: print them too.
+          docker ps -a || true
+          for container in $(docker ps -aq); do
+            echo "=== logs of container $container"
+            docker logs --tail 100 "$container" || true
+          done
 
   # ============================================================================
   # JOB 4b: Optional Features
