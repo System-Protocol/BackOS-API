@@ -1,6 +1,6 @@
-import * as path from 'path';
 import * as fs from 'fs';
 import { execSync } from 'child_process';
+import { composeFileArgs } from './helpers/compose-files';
 import { OWNER_INVITATION_FILE, OWNER_SESSION_FILE } from './helpers/owner-invitation-file';
 
 /**
@@ -19,7 +19,6 @@ export default async function globalTeardown() {
         console.log('[e2e] KEEP_TEST_INFRA=1 - leaving test infra running.');
         return;
     }
-    const composeFile = path.resolve(__dirname, '..', 'deploy', 'docker-compose.test.yml');
     console.log('[e2e] Stopping test infra...');
-    execSync(`docker compose -f "${composeFile}" down -v`, { stdio: 'inherit' });
+    execSync(`docker compose ${composeFileArgs()} down -v`, { stdio: 'inherit' });
 }

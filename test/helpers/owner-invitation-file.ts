@@ -12,12 +12,12 @@ import * as path from 'path';
 export const OWNER_INVITATION_FILE = path.resolve(__dirname, '..', '..', '.e2e-owner-invitation.json');
 
 /**
- * Where the first spec file to activate the owner leaves the resulting access token, so the
- * next spec files reuse it. The invitation above is SINGLE-USE and the database is shared by
- * every spec file of the run (`--runInBand`, one seed), so activating twice always fails with
- * 401. A fresh login is no alternative: the TOTP anti-replay (`lastUsedStep`) rejects a code
- * from the time step that was just used to confirm MFA.
+ * Where the first spec file to activate the owner leaves its session (access token, plus the
+ * TOTP secret and e-mail needed to log in again if the token expires), so the next spec files
+ * reuse it. The invitation above is SINGLE-USE and the database is shared by every spec file of
+ * the run (`--runInBand`, one seed), so activating twice always fails with 401.
  *
- * Deleted by test/global-teardown-e2e.ts (ignored by Git).
+ * Contains the owner's TOTP secret in plaintext, like the invitation file: ignored by Git and
+ * deleted by test/global-teardown-e2e.ts.
  */
 export const OWNER_SESSION_FILE = path.resolve(__dirname, '..', '..', '.e2e-owner-session.json');

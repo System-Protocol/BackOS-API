@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import { execSync } from 'child_process';
+import { composeFileArgs } from './helpers/compose-files';
 import { OWNER_INVITATION_FILE, OWNER_SESSION_FILE } from './helpers/owner-invitation-file';
 
 /**
@@ -13,7 +14,6 @@ import { OWNER_INVITATION_FILE, OWNER_SESSION_FILE } from './helpers/owner-invit
 export default async function globalSetup() {
     dotenv.config({ path: path.resolve(__dirname, '..', '.env.test') });
 
-    const composeFile = path.resolve(__dirname, '..', 'deploy', 'docker-compose.test.yml');
     const repoRoot = path.resolve(__dirname, '..');
 
     // A session left over by a crashed run belongs to a database that no longer exists.
@@ -22,7 +22,7 @@ export default async function globalSetup() {
     console.log('[e2e] Starting test infra (Postgres + Redis)...');
     // `--wait` blocks until both services report healthy (see the healthcheck: blocks in
     // docker-compose.test.yml) - without it, migrate below could race an unready Postgres.
-    execSync(`docker compose -f "${composeFile}" up -d --wait`, { stdio: 'inherit' });
+    execSync(`docker compose ${composeFileArgs()} up -d --wait`, { stdio: 'inherit' });
 
     console.log('[e2e] Applying Prisma migrations to the test database...');
     execSync('pnpm exec prisma migrate deploy', { stdio: 'inherit', env: { ...process.env }, cwd: repoRoot });

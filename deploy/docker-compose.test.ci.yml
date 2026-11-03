@@ -1,0 +1,21 @@
+# ==============================================================================
+# CI OVERRIDE FOR THE E2E TEST INFRASTRUCTURE
+# Used ONLY together with docker-compose.test.yml (see E2E_COMPOSE_OVERRIDE in
+# test/helpers/compose-files.ts and the e2e job of .github/workflows/ci.yml).
+#
+# WHY: the platform-lifecycle e2e test starts a generated backend in its own Docker container.
+# That container reaches the test Postgres through `host.docker.internal`, i.e. the address
+# `host-gateway` maps to (the Docker bridge gateway, typically 172.17.0.1 on Linux). The base
+# file publishes Postgres on 127.0.0.1 only, which that address does not serve.
+#
+# This file ADDS (compose appends `ports` lists) one more binding for that single address -
+# nothing is published on 0.0.0.0, and the loopback binding of the base file is untouched.
+#
+# POSTGRES_TEST_DOCKER_BIND is required: the CI resolves it from the very same
+# `--add-host host.docker.internal:host-gateway` flag DockerRuntimeManagerService uses.
+# Docker Desktop (macOS/Windows) does not need this file at all.
+# ==============================================================================
+services:
+  postgres-test:
+    ports:
+      - "${POSTGRES_TEST_DOCKER_BIND:?set POSTGRES_TEST_DOCKER_BIND to the address host.docker.internal resolves to}:${POSTGRES_TEST_PORT:-5433}:5432"

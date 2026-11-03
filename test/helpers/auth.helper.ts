@@ -18,10 +18,17 @@ import { generateTotpCode } from './totp.helper';
  */
 export async function bootstrapOwnerSession(app: INestApplication): Promise<{ accessToken: string }> {
     // The invitation is single-use and shared by all spec files of the run: once one file has
-    // activated the owner, the others just reuse its access token (same JWT secret, same DB).
-    if (fs.existsSync(OWNER_SESSION_FILE)) {
-        const { accessToken } = JSON.parse(fs.readFileSync(OWNER_SESSION_FILE, 'utf-8'));
-        if (accessToken) return { accessToken };
+    // activated the owner, the others reuse that session (same JWT secret, same DB).
+    const cached = readOwnerSession();
+    if (cached) {
+        if (!isJwtExpired(cached.accessToken)) return { accessToken: cached.accessToken };
+
+        // The access token is short-lived (JWT_ACCESS_EXPIRES_IN) and a long run can outlive it.
+        // Log in again with a FRESH code: the anti-replay only rejects a code from the time step
+        // already used, and the token expired long after that step.
+        const { accessToken } = await loginWithKnownTotpSecret(app, cached.workEmail, cached.totpSecret);
+        writeOwnerSession({ ...cached, accessToken });
+        return { accessToken };
     }
 
     if (!fs.existsSync(OWNER_INVITATION_FILE)) {
@@ -48,9 +55,37 @@ export async function bootstrapOwnerSession(app: INestApplication): Promise<{ ac
         .expect(200);
 
     const accessToken: string = confirmRes.body.accessToken;
-    fs.writeFileSync(OWNER_SESSION_FILE, JSON.stringify({ accessToken }), 'utf-8');
+    writeOwnerSession({ accessToken, totpSecret, workEmail });
 
     return { accessToken };
+}
+
+interface OwnerSession {
+    accessToken: string;
+    totpSecret: string;
+    workEmail: string;
+}
+
+function readOwnerSession(): OwnerSession | null {
+    if (!fs.existsSync(OWNER_SESSION_FILE)) return null;
+    const session = JSON.parse(fs.readFileSync(OWNER_SESSION_FILE, 'utf-8')) as Partial<OwnerSession>;
+
+    return session.accessToken && session.totpSecret && session.workEmail ? (session as OwnerSession) : null;
+}
+
+function writeOwnerSession(session: OwnerSession): void {
+    fs.writeFileSync(OWNER_SESSION_FILE, JSON.stringify(session), 'utf-8');
+}
+
+/** True when the token is expired or about to be (default margin: 60s), or cannot be decoded. */
+function isJwtExpired(jwt: string, marginSeconds = 60): boolean {
+    try {
+        const payload = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf-8')) as { exp?: number };
+
+        return typeof payload.exp !== 'number' || payload.exp * 1000 - Date.now() < marginSeconds * 1000;
+    } catch {
+        return true;
+    }
 }
 
 /**

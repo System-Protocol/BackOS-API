@@ -189,13 +189,25 @@ jobs:
           [ -z "$CI_JWT_SECRET" ] || echo "JWT_SECRET=$CI_JWT_SECRET" >> .env.test
 
       # Execute full stack end-to-end tests
+      # A generated backend runs in its own container and reaches the test Postgres through
+      # host.docker.internal. Ask Docker where that name points, using the same flag as
+      # DockerRuntimeManagerService, instead of assuming 172.17.0.1.
+      - name: Resolve the address generated backends use to reach the host
+        run: |
+          gateway="$(docker run --rm --add-host host.docker.internal:host-gateway \
+            --entrypoint getent postgres:16-alpine hosts host.docker.internal \
+            | awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print $1; exit }')"
+          if [ -z "$gateway" ]; then
+            echo "::warning::Could not resolve host.docker.internal; publishing the test Postgres on all interfaces of this throwaway runner."
+            gateway="0.0.0.0"
+          fi
+          echo "host.docker.internal -> $gateway"
+          echo "POSTGRES_TEST_DOCKER_BIND=$gateway" >> "$GITHUB_ENV"
+
       - name: Execute end-to-end integration suite
         env:
-          # Generated backends run in Docker and reach the test Postgres through
-          # host.docker.internal (the Docker bridge gateway), not through 127.0.0.1. A port
-          # published on loopback only is unreachable from there, so on this throwaway runner it
-          # is published on all interfaces (see deploy/docker-compose.test.yml).
-          POSTGRES_TEST_BIND: "0.0.0.0"
+          # Adds the extra, narrowly-scoped Postgres binding (deploy/docker-compose.test.ci.yml).
+          E2E_COMPOSE_OVERRIDE: deploy/docker-compose.test.ci.yml
         run: pnpm run test:e2e
 
       # Debugging helper: Print container logs if E2E tests fail
