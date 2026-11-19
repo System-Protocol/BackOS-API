@@ -10,6 +10,7 @@ import { RecoveryCodeService } from '../common/utils/recovery-code.service';
 import { MfaService } from '../common/services/mfa.service';
 import { TotpService } from '../common/utils/totp.service';
 import { QrCodeService } from '../common/utils/qr-code.service';
+import { JWT_ALGORITHM, JWT_AUDIENCE, JWT_ISSUER } from './jwt.constants';
 // NOTE: CryptoService is no longer listed as a provider here - it now lives in the global
 // `CommonModule` (see that module's header comment), since `ProvisioningService` and
 // `PlatformServicesService` need it too and neither imports `AuthModule`. `MfaService` below
@@ -26,6 +27,14 @@ import { QrCodeService } from '../common/utils/qr-code.service';
                 secret: configService.getOrThrow<string>('jwt.secret'),
                 signOptions: {
                     expiresIn: configService.getOrThrow<StringValue>('jwt.expiresIn'),
+                    algorithm: JWT_ALGORITHM,
+                    issuer: JWT_ISSUER,
+                    audience: JWT_AUDIENCE,
+                },
+                verifyOptions: {
+                    algorithms: [JWT_ALGORITHM],
+                    issuer: JWT_ISSUER,
+                    audience: JWT_AUDIENCE,
                 },
             }),
         }),

@@ -2,7 +2,7 @@
 
 [← All deployment guides](README.md)
 
-A stable BackOS instance for you or your team, reachable **only from your local network**. No domain name, no certificate, no router configuration. It is designed for a **dedicated Windows PC** acting as a server, and it comes with a **tray icon** and double-click scripts to start and stop it without a terminal.
+A stable BackOS instance for you or your team, reachable **only from your local network**. No domain name, no public certificate, no router configuration (the API creates its own private HTTPS certificate). It is designed for a **dedicated Windows PC** acting as a server, and it comes with a **tray icon** and double-click scripts to start and stop it without a terminal.
 
 > [!NOTE]
 > Looking for a stable BackOS on **your own computer** (Linux or macOS), driven with `make`? That is [Local](DEPLOIEMENT_LOCAL.md). To **change the code**, see [Development](DEPLOIEMENT_DEV.md). The three differ: see [Dev, Local or LAN?](README.md#4-dev-local-or-lan).
@@ -10,9 +10,9 @@ A stable BackOS instance for you or your team, reachable **only from your local 
 | At a glance        |                                                                                              |
 | ------------------ | -------------------------------------------------------------------------------------------- |
 | **Best for**       | Personal or internal use on a dedicated PC, with no public domain                            |
-| **Reachable from** | Any device on the same network: `http://<LAN-IP-of-the-server>:4803`                         |
+| **Reachable from** | Any device on the same network: `https://<LAN-IP-of-the-server>:4803`                         |
 | **You will need**  | Docker on the machine that acts as the server (Docker Desktop on Windows)                    |
-| **Security**       | Same hardened image as Demo and Production, but **plain HTTP** (no TLS)                      |
+| **Security**       | Same hardened image as Demo and Production, **HTTPS** with a private certificate authority                      |
 
 **On this page:** [What runs](#what-runs) · [Choose how to drive it](#choose-how-to-drive-it) · [Before you start](#before-you-start) · [Step by step](#step-by-step) · [Daily use](#daily-use) · [Troubleshooting](#troubleshooting) · [Good to know](#good-to-know) · [Combine it](#combine-it-with-other-modes)
 
@@ -89,7 +89,8 @@ Open `.env.lan` and replace every `REPLACE_ME…` and `REPLACE_WITH…`:
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `PROJECT_NAME`                                       | Short name: it names your containers, networks and volumes                                                                               |
 | `FRONTEND_URL`                                       | The address where your users open the BackOS front end. It is used to build activation links and e-mail links                             |
-| `CORS_ORIGIN`                                        | `*` is fine here, **only** because the server is never reachable from the Internet                                                       |
+| `LAN_TLS_IPS`                                        | The addresses clients use to reach this server, comma-separated: the **LAN address** of the server, then its **WireGuard address** if you use the tunnel (for example `192.168.1.20,10.8.0.1`). Private addresses only |
+| `CORS_ORIGIN`                                        | The exact origin of the desktop app: `http://localhost:3000` (add `http://localhost:9173` while developing the front end). Avoid `*`        |
 | `POSTGRES_PASSWORD`, `POSTGRES_PROVISIONING_PASSWORD`, `POSTGRES_APP_PASSWORD` | Strong random values                                                                           |
 | `REDIS_PASSWORD`                                     | A strong random value, **at least 16 characters**                                                                                        |
 | `ENCRYPTION_KEY`, `JWT_SECRET`                       | The secrets you generated                                                                                                                |
@@ -137,12 +138,32 @@ docker exec <PROJECT_NAME>-lan-orchestrator rm /app/owner-activation.txt
 On the server, then from any other device of the same network:
 
 ```
-http://<LAN-IP-of-the-server>:4803/api/health
+https://<LAN-IP-of-the-server>:4803/api/health
 ```
 
-✅ It answers `200`. (On the server, the tray's *Test … /api/health* entry opens this page for you.)
+✅ It answers `200`, **once the device trusts the certificate** (next section). Do **not** click through a browser certificate warning: that would defeat the point of HTTPS. On the server, the tray's *Check API health (HTTPS)* entry reports the result of a real, verified HTTPS check made inside the container, and from a command line:
 
-The API itself has **no web page**: your BackOS front end (for example on PC2) must be configured to call `http://<LAN-IP-of-the-server>:4803`. The interactive Swagger docs exist only in [Development](DEPLOIEMENT_DEV.md): they are off in production mode.
+```bash
+curl --cacert backos-ca.crt https://<LAN-IP-of-the-server>:4803/api/health
+```
+
+The API itself has **no web page**: your BackOS front end (for example on PC2) must be configured to call `https://<LAN-IP-of-the-server>:4803/api`.
+
+### 4b. Trust the certificate on your devices (HTTPS)
+
+The API serves HTTPS with a certificate issued by a **private certificate authority** (CA) that the stack creates for you on its first start. No public authority can certify a private IP address, so each client must be told, once, which CA to trust. The desktop app does this by **pinning the CA's fingerprint**: it then trusts that one CA, for the BackOS addresses you configured, and nothing else. You never install anything in Windows' certificate store.
+
+1. On the server, run `deploy\show-ca.bat`. It prints the CA **fingerprint** (SHA-256, 32 pairs of hex digits) and writes `backos-ca.crt` (a public certificate: it contains no secret).
+2. On each PC that runs *BACKOS Control*, open the app's server settings, add the address `https://<LAN-IP-of-the-server>:4803/api`, and when the app shows the fingerprint it received, type or paste the one from step 1. The app only accepts the CA if both are identical. Compare them yourself: that comparison is what protects you from someone impersonating the server.
+
+What the stack guarantees:
+
+- The CA can only certify **private network addresses** and the name `host.docker.internal`. Even if its key leaked, it could not impersonate a public website.
+- The CA's private key lives in its **own volume**, mounted only in the short-lived `tls-init` job. The API never sees it.
+- The server certificate lasts 180 days and is renewed automatically at each start (or when `LAN_TLS_IPS` changes). A renewed certificate is picked up by the running API without a restart, and the desktop apps need **nothing** to be redone: they pinned the CA, not the certificate.
+- Generated backends receive the CA's **public** certificate (read-only) so they verify BackOS over HTTPS too.
+
+If you lose the CA volume, a new CA is created and **every desktop app must pin the new fingerprint**. Back up the `<PROJECT_NAME>-lan-tls-ca` volume like any other secret, or keep an offline copy of it. The interactive Swagger docs exist only in [Development](DEPLOIEMENT_DEV.md): they are off in production mode.
 
 ### 5. Check your first generated backend
 
@@ -202,6 +223,8 @@ When the stack starts again (or after a reboot), the API **automatically restart
 | `Cannot connect to the Docker daemon`                    | Docker is not running. Start Docker Desktop.                                                                                                                   |
 | I double-click `backend-tray.vbs` and nothing seems to happen | The icon is in the tray, possibly hidden behind the `^` arrow. If it never appears, start `deploy\start-backend.bat` instead.                             |
 | The icon is red                                          | A container exited. Right-click → **View logs**, or run `status-backend.bat`.                                                                                  |
+| The app says the certificate is not trusted or the fingerprint is unknown | You have not pinned the CA on that PC yet: see [4b](#4b-trust-the-certificate-on-your-devices-https). If you did, the server's CA changed (volume lost): run `deploy\show-ca.bat` again and pin the new fingerprint. |
+| The app says the certificate does not match the address  | The address is not in `LAN_TLS_IPS`. Add it, restart the stack (the certificate is re-issued automatically). |
 | The page does not load from another device               | Check that you use the server's **local** IP and port `4803`, and that both devices are on the same network. On Windows, the firewall may block incoming connections on that port: allow it for **private networks** only. |
 | The address worked yesterday and not today               | The server's local IP changed. Reserve a fixed IP in your router (see the tip above).                                                                          |
 | The API refuses to start                                 | A setting is missing or invalid in `.env.lan`. The logs name it. Typical causes: a `REPLACE_ME…` left, `ENCRYPTION_KEY` not 64 hexadecimal characters, `JWT_SECRET` under 32 characters, `REDIS_PASSWORD` under 16. |
@@ -228,7 +251,7 @@ When the stack starts again (or after a reboot), the API **automatically restart
 
 **Limits**
 
-- ⚠️ **No TLS, by nature** (no domain, so no certificate). Credentials and tokens travel **in clear text** on the local network. That is acceptable on a trusted home or office network. Never let it slide onto a public Wi-Fi without a tunnel on top: see [WireGuard](DEPLOIEMENT_WIREGUARD.md).
+- **HTTPS with a private CA.** Credentials and tokens are encrypted on the local network too. The trust is established by the fingerprint you pin on each PC (see [4b](#4b-trust-the-certificate-on-your-devices-https)): compare it carefully the first time. The API serves HTTPS itself, with no reverse proxy in between. Need remote access? See [WireGuard](DEPLOIEMENT_WIREGUARD.md).
 - **Never forward port `4803` on your router.** It would expose your private instance to the Internet.
 - Because the stack trusts one proxy hop, a client of your own network could forge the `X-Forwarded-For` header on the administration API (the IP written in audit logs could be falsified). The risk stays inside your local network.
 - Stopping the stack does not stop generated backends (see above).

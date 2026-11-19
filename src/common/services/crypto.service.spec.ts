@@ -18,6 +18,7 @@ describe('CryptoService', () => {
                 if (key === 'security.encryptionKey') return encryptionKeyHex;
                 throw new Error(`clé de config inattendue: ${key}`);
             },
+            get: () => undefined, // pas de clé précédente
         } as unknown as ConfigService;
         service = new CryptoService(configService);
     });
@@ -76,6 +77,61 @@ describe('CryptoService', () => {
 
         it('rejette un format invalide (segment manquant)', () => {
             expect(() => service.decryptWithRawKey('a:b', encryptionKeyHex)).toThrow(BadRequestException);
+        });
+    });
+    describe('rotation de clé (ENCRYPTION_KEY_PREVIOUS)', () => {
+        const oldKey = 'b'.repeat(64);
+        const newKey = 'c'.repeat(64);
+        const make = (current: string, previous?: string) =>
+            new CryptoService({
+                getOrThrow: () => current,
+                get: (k: string) => (k === 'security.encryptionKeyPrevious' ? previous : undefined),
+            } as unknown as ConfigService);
+
+        it("un secret chiffré avec l'ancienne clé reste lisible pendant la rotation (schéma 1)", () => {
+            const legacy = make(oldKey).encrypt('JBSWY3DPEHPK3PXP');
+            expect(make(newKey, oldKey).decrypt(legacy)).toBe('JBSWY3DPEHPK3PXP');
+        });
+
+        it("sans clé précédente, l'ancien secret est illisible (la rotation n'est pas silencieuse)", () => {
+            const legacy = make(oldKey).encrypt('valeur');
+            expect(() => make(newKey).decrypt(legacy)).toThrow();
+        });
+
+        it('reencrypt() migre vers la nouvelle clé, et le résultat est lisible SANS clé précédente', () => {
+            const legacy = make(oldKey).encrypt('valeur');
+            const rotating = make(newKey, oldKey);
+            const { value, changed } = rotating.reencrypt(legacy);
+            expect(changed).toBe(true);
+            expect(make(newKey).decrypt(value)).toBe('valeur');
+        });
+
+        it('reencrypt() ne touche pas une valeur déjà à la nouvelle clé (idempotent)', () => {
+            const current = make(newKey).encrypt('valeur');
+            expect(make(newKey, oldKey).reencrypt(current)).toEqual({ value: current, changed: false });
+        });
+
+        it("une valeur corrompue n'est PAS « réparée » par la clé précédente", () => {
+            const [iv, tag, data] = make(oldKey).encrypt('secret').split(':');
+            const tampered = [iv, tag.slice(0, -2) + (tag.slice(-2) === '00' ? '01' : '00'), data].join(':');
+            expect(() => make(newKey, oldKey).decrypt(tampered)).toThrow();
+        });
+
+        it('schéma 2 (clé brute) : fallback sur la clé précédente uniquement pour la clé courante', () => {
+            const legacy = make(oldKey).encryptWithRawKey('pwd-db', oldKey);
+            const rotating = make(newKey, oldKey);
+            expect(rotating.decryptWithRawKey(legacy, newKey)).toBe('pwd-db');
+            // une autre clé fournie par l'appelant ne bénéficie PAS du fallback
+            expect(() => rotating.decryptWithRawKey(legacy, 'd'.repeat(64))).toThrow();
+        });
+
+        it('schéma 2 : reencryptWithRawKey migre puis devient idempotent', () => {
+            const legacy = make(oldKey).encryptWithRawKey('pwd-db', oldKey);
+            const rotating = make(newKey, oldKey);
+            const first = rotating.reencryptWithRawKey(legacy);
+            expect(first.changed).toBe(true);
+            expect(make(newKey).decryptWithRawKey(first.value, newKey)).toBe('pwd-db');
+            expect(rotating.reencryptWithRawKey(first.value).changed).toBe(false);
         });
     });
 });

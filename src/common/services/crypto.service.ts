@@ -32,9 +32,22 @@ export class CryptoService {
     private readonly algorithm = 'aes-256-gcm';
     private readonly derivedKey: Buffer;
 
+    // KEY ROTATION (step 2): `ENCRYPTION_KEY_PREVIOUS` is optional. While it is set, data written with
+    // the old key stays readable (decrypt falls back to it) and new data is written with the current
+    // key; `prisma/rotate-encryption-key.ts` then re-encrypts what is left, after which the variable
+    // can be removed. Nothing about the stored formats changes.
+    private readonly currentKeyHex: string;
+    private readonly previousKeyHex: string | null;
+    private readonly previousDerivedKey: Buffer | null;
+
     constructor(private readonly configService: ConfigService) {
         // Retrieve master key from config namespace or environment variable
         const secretKey = this.configService.getOrThrow<string>('security.encryptionKey');
+        this.currentKeyHex = secretKey;
+
+        const previous = this.configService.get<string>('security.encryptionKeyPrevious') || null;
+        this.previousKeyHex = previous;
+        this.previousDerivedKey = previous ? createHash('sha256').update(previous).digest() : null;
 
         // Derive a deterministic 32-byte (256-bit) key using SHA-256. Used only by
         // `encrypt`/`decrypt` below (the original `CryptoService` scheme) - kept exactly as it
@@ -70,12 +83,46 @@ export class CryptoService {
     }
 
     /**
+     * Decrypts a value produced by `encrypt()`. Tries the current key first, then (only if configured)
+     * the previous one, so a key rotation never makes existing secrets unreadable. The GCM
+     * authentication tag guarantees a wrong key fails cleanly rather than returning garbage.
+     */
+    decrypt(value: string): string {
+        try {
+            return this.decryptWithKey(value, this.derivedKey);
+        } catch (error) {
+            if (error instanceof BadRequestException || !this.previousDerivedKey) throw error;
+            try {
+                return this.decryptWithKey(value, this.previousDerivedKey);
+            } catch {
+                throw error; // report the failure against the CURRENT key
+            }
+        }
+    }
+
+    /** True when `value` is readable with the current key (i.e. it does not need re-encrypting). */
+    isEncryptedWithCurrentKey(value: string): boolean {
+        try {
+            this.decryptWithKey(value, this.derivedKey);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /** Re-encrypts `value` under the current key when it is still under the previous one. */
+    reencrypt(value: string): { value: string; changed: boolean } {
+        if (this.isEncryptedWithCurrentKey(value)) return { value, changed: false };
+        return { value: this.encrypt(this.decrypt(value)), changed: true };
+    }
+
+    /**
      * Decrypts a string produced by `encrypt()` above.
      * * @param value - The encrypted string formatted as `<IV_HEX>:<AUTH_TAG_HEX>:<ENCRYPTED_DATA_HEX>`.
      * @returns The original plain text string.
      * @throws BadRequestException if the input string format is invalid.
      */
-    decrypt(value: string): string {
+    private decryptWithKey(value: string, key: Buffer): string {
         const parts = value.split(':');
 
         if (parts.length !== 3) {
@@ -86,7 +133,7 @@ export class CryptoService {
 
         // SEC-021: the authentication tag length is enforced (16 bytes) - Node otherwise accepts
         // truncated tags down to 4 bytes.
-        const decipher = createDecipheriv(this.algorithm, this.derivedKey, Buffer.from(ivHex, 'hex'), {
+        const decipher = createDecipheriv(this.algorithm, key, Buffer.from(ivHex, 'hex'), {
             authTagLength: 16,
         });
 
@@ -136,8 +183,7 @@ export class CryptoService {
      * @returns The original plain text string.
      * @throws BadRequestException if the input string format is invalid.
      */
-    decryptWithRawKey(payload: string, encryptionKeyHex: string): string {
-        const key = this.parseRawKey(encryptionKeyHex);
+    private decryptRaw(payload: string, key: Buffer): string {
         const [ivB64, authTagB64, dataB64] = payload.split(':');
         if (!ivB64 || !authTagB64 || !dataB64) {
             throw new BadRequestException('Invalid ciphertext format. Expected IV:TAG:DATA (base64).');
@@ -148,6 +194,39 @@ export class CryptoService {
 
         const decrypted = Buffer.concat([decipher.update(Buffer.from(dataB64, 'base64')), decipher.final()]);
         return decrypted.toString('utf8');
+    }
+
+    /**
+     * Same as the scheme-2 decryption above, with the rotation fallback: when the caller passes the
+     * CURRENT `ENCRYPTION_KEY` and a previous key is configured, a payload that only the previous key
+     * can open is still decrypted.
+     */
+    decryptWithRawKey(payload: string, encryptionKeyHex: string): string {
+        const key = this.parseRawKey(encryptionKeyHex);
+        try {
+            return this.decryptRaw(payload, key);
+        } catch (error) {
+            const usesCurrentKey = encryptionKeyHex.toLowerCase() === this.currentKeyHex.toLowerCase();
+            if (error instanceof BadRequestException || !usesCurrentKey || !this.previousKeyHex) throw error;
+            try {
+                return this.decryptRaw(payload, this.parseRawKey(this.previousKeyHex));
+            } catch {
+                throw error;
+            }
+        }
+    }
+
+    /** Re-encrypts a scheme-2 payload under the current key when it is still under the previous one. */
+    reencryptWithRawKey(payload: string): { value: string; changed: boolean } {
+        try {
+            this.decryptRaw(payload, this.parseRawKey(this.currentKeyHex));
+            return { value: payload, changed: false };
+        } catch {
+            return {
+                value: this.encryptWithRawKey(this.decryptWithRawKey(payload, this.currentKeyHex), this.currentKeyHex),
+                changed: true,
+            };
+        }
     }
 
     /** SEC-021: a malformed key (non-hex, wrong length) fails loudly instead of being silently truncated. */

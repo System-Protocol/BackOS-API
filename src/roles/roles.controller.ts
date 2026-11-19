@@ -4,6 +4,7 @@ import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { ReplaceRolePermissionsDto } from './dto/replace-role-permissions.dto';
 import { RequirePermissions } from '../common/decorators/require-permissions.decorator';
+import { RequireStepUp } from '../common/decorators/require-step-up.decorator';
 import { PERMISSIONS } from '../common/constants/permissions.constant';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
@@ -73,6 +74,7 @@ export class RolesController {
      * @route PUT /roles/:id/permissions
      */
     @RequirePermissions(PERMISSIONS.ROLES_UPDATE)
+    @RequireStepUp()
     @Put(':id/permissions')
     replacePermissions(
         @CurrentUser() actor: { userId: string },
@@ -88,6 +90,7 @@ export class RolesController {
      * @route DELETE /roles/:id
      */
     @RequirePermissions(PERMISSIONS.ROLES_DELETE)
+    @RequireStepUp()
     @Delete(':id')
     delete(@CurrentUser() actor: { userId: string }, @Param('id') id: string) {
         return this.rolesService.delete(actor.userId, id);

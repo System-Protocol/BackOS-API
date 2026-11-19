@@ -8,6 +8,8 @@ export const AUDIT_TARGETS = {
      */
     USER: 'User',
 
+    PASSKEY: 'Passkey',
+
     /**
      * Target type for actions affecting Platform entities.
      */

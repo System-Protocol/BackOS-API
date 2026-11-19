@@ -29,6 +29,7 @@ import { DeleteOwnAccountDto } from './dto/delete-own-account.dto';
 
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../common/decorators/require-permissions.decorator';
+import { RequireStepUp } from '../common/decorators/require-step-up.decorator';
 import { PERMISSIONS } from '../common/constants/permissions.constant';
 
 /**
@@ -261,6 +262,7 @@ export class UsersController {
     @ApiOperation({ summary: 'Process a DISABLED user: Anonymize or Hard Delete' })
     @ApiOkResponse({ description: 'DISABLED user processed successfully (Anonymized or Hard Deleted).' })
     @RequirePermissions(PERMISSIONS.USERS_DELETE)
+    @RequireStepUp()
     @Post(':id/process-disabled')
     processDisabledUser(
         @CurrentUser() actor: { userId: string },
@@ -287,6 +289,7 @@ export class UsersController {
     @ApiOperation({ summary: 'Assign a role to a target user' })
     @ApiOkResponse({ description: 'Role assigned to user successfully.' })
     @RequirePermissions(PERMISSIONS.USERS_MANAGE_ROLES)
+    @RequireStepUp()
     @Post(':id/roles')
     assignRole(@CurrentUser() actor: { userId: string }, @Param('id') id: string, @Body() dto: AssignRoleDto) {
         return this.usersService.assignRole(actor.userId, id, dto.roleId);
@@ -298,6 +301,7 @@ export class UsersController {
     @ApiOperation({ summary: 'Revoke a role from a target user' })
     @ApiOkResponse({ description: 'Role revoked from user successfully.' })
     @RequirePermissions(PERMISSIONS.USERS_MANAGE_ROLES)
+    @RequireStepUp()
     @Delete(':id/roles/:roleId')
     removeRole(@CurrentUser() actor: { userId: string }, @Param('id') id: string, @Param('roleId') roleId: string) {
         return this.usersService.removeRole(actor.userId, id, roleId);
@@ -322,6 +326,7 @@ export class UsersController {
     @ApiOperation({ summary: 'Permanently delete a user account' })
     @ApiOkResponse({ description: 'Target user account permanently deleted.' })
     @RequirePermissions(PERMISSIONS.USERS_DELETE)
+    @RequireStepUp()
     @Delete(':id')
     deleteUser(@CurrentUser() actor: { userId: string }, @Param('id') id: string) {
         return this.usersService.hardDeleteUser(actor.userId, id);

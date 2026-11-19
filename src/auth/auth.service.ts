@@ -367,6 +367,21 @@ export class AuthService {
             throw new UnauthorizedException('Invalid credentials.');
         }
 
+        // SECURITY (step 3 - no downgrade): once an account owns a passkey, the TOTP-only path is
+        // closed for it. Otherwise the account would be exactly as weak as its weakest factor, and a
+        // stolen TOTP secret (or a phished code) would bypass the passkey entirely. We refuse BEFORE
+        // checking the code, so this neither burns failed-attempt counters nor confirms a code.
+        if (await this.passkeysEnforcedFor(user.id)) {
+            await this.auditLog.log({
+                action: AUDIT_ACTIONS.LOGIN_DOWNGRADE_BLOCKED,
+                actorId: user.id,
+                targetType: AUDIT_TARGETS.USER,
+                targetId: user.id,
+                context,
+            });
+            throw new UnauthorizedException('Invalid credentials.');
+        }
+
         // 2. Reject outright if the account is currently locked out from prior failed attempts.
         // We deliberately return the same generic message as an invalid credential, so an
         // attacker cannot use response differences to enumerate which accounts are locked.
@@ -512,6 +527,17 @@ export class AuthService {
             throw new UnauthorizedException('Invalid credentials.');
         }
 
+        // SECURITY (step 3, opt-in): a generated backend cannot run a passkey ceremony, so by default a
+        // user who owns a passkey can still sign in THERE with a TOTP code (this opens the generated
+        // platform only, never BackOS itself). Set PASSKEY_BLOCK_GENERATED_BACKEND_TOTP=true to close
+        // that door too - those users then cannot use the internal login of generated backends at all.
+        if (
+            String(this.configService.get('PASSKEY_BLOCK_GENERATED_BACKEND_TOTP', false)) === 'true' &&
+            (await this.passkeysEnforcedFor(user.id))
+        ) {
+            throw new UnauthorizedException('Invalid credentials.');
+        }
+
         const mfa = await this.prisma.userMfa.findUnique({ where: { userId: user.id } });
         if (!mfa || mfa.status !== MfaStatus.ACTIVE) {
             throw new UnauthorizedException('Invalid credentials.');
@@ -587,6 +613,13 @@ export class AuthService {
             throw new UnauthorizedException('Invalid credentials.');
         }
 
+        // SECURITY (step 2): a recovery code is a login credential like a TOTP code, so it obeys the
+        // same per-account lockout. Before, this path ignored `lockedUntil` entirely (a locked account
+        // could still be entered with a recovery code) and never counted failures.
+        if (user.lockedUntil && user.lockedUntil > new Date()) {
+            throw new UnauthorizedException('Invalid credentials.');
+        }
+
         // 2. Retrieve unused recovery codes for the target user
         const candidates = await this.prisma.recoveryCode.findMany({
             where: { userId: user.id, usedAt: null },
@@ -609,6 +642,7 @@ export class AuthService {
 
         // 4. Handle invalid or already consumed recovery code
         if (!match) {
+            await this.registerFailedLoginAttempt(user.id, context);
             throw new UnauthorizedException('Invalid credentials.');
         }
 
@@ -621,6 +655,12 @@ export class AuthService {
             throw new UnauthorizedException('Invalid credentials.');
         }
 
+        // A successful credential check clears the failure counter, exactly like `login()` does.
+        await this.prisma.user.update({
+            where: { id: user.id },
+            data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+        });
+
         // 6. Record successful recovery login event
         await this.auditLog.log({
             action: AUDIT_ACTIONS.RECOVERY_CODE_USED,
@@ -629,6 +669,13 @@ export class AuthService {
             targetId: user.id,
             context,
         });
+
+        // SECURITY (step 3): a recovery code is a fallback for a LOST device, not a way around the
+        // passkey. For an account that owns passkeys it only opens a short "recovery session" that can
+        // enrol a new passkey (and revoke the lost ones) - nothing else (see `@AllowRecoveryScope()`).
+        if (await this.passkeysEnforcedFor(user.id)) {
+            return this.issueRecoveryScopedSession(user.id, user.workEmail);
+        }
 
         // 7. Issue and return authentication JWT tokens
         return this.issueTokens(user.id, user.workEmail);
@@ -665,6 +712,19 @@ export class AuthService {
             throw new UnauthorizedException('Re-authentication failed.');
         }
 
+        // SECURITY (step 2): step-up is now required on destructive/exfiltrating routes, which makes it a
+        // brute-force target for anyone holding a stolen access token. It therefore shares the login
+        // lockout: refused while the account is locked, and every wrong code counts as a failed attempt.
+        if (user.lockedUntil && user.lockedUntil > new Date()) {
+            throw new UnauthorizedException('Re-authentication failed.');
+        }
+
+        // SECURITY (step 3): an account with a passkey re-authenticates with that passkey (see
+        // `PasskeysService` step-up), never with a TOTP code - same no-downgrade rule as login().
+        if (await this.passkeysEnforcedFor(user.id)) {
+            throw new UnauthorizedException('Re-authentication failed.');
+        }
+
         const mfa = await this.prisma.userMfa.findUnique({ where: { userId: user.id } });
         if (!mfa || mfa.status !== MfaStatus.ACTIVE) {
             throw new UnauthorizedException('Re-authentication failed.');
@@ -672,6 +732,7 @@ export class AuthService {
 
         const isValid = await this.verifyTotpOnce(user.id, mfa.secretEncrypted, totpCode);
         if (!isValid) {
+            await this.registerFailedLoginAttempt(user.id, context);
             await this.auditLog.log({
                 action: AUDIT_ACTIONS.STEP_UP_FAILED,
                 actorId: user.id,
@@ -849,6 +910,62 @@ export class AuthService {
      * @param email - Primary work email of user (embedded into JWT payload).
      * @returns Object containing generated `accessToken` (JWT) and `refreshToken` (opaque raw string).
      */
+    /** True when the user owns at least one non-revoked passkey. */
+    async hasActivePasskeys(userId: string): Promise<boolean> {
+        return (await this.prisma.userPasskey.count({ where: { userId, revokedAt: null } })) > 0;
+    }
+
+    /**
+     * Passkey-only policy: on when PASSKEY_ENFORCE is not "false" AND the user owns a passkey AND the
+     * feature is configured. Fail-safe: if WEBAUTHN_RP_ID is empty, passkeys cannot work at all, so the
+     * TOTP path must not stay blocked either - otherwise a configuration slip would lock out everyone
+     * who enrolled a passkey.
+     */
+    async passkeysEnforcedFor(userId: string): Promise<boolean> {
+        if (String(this.configService.get('PASSKEY_ENFORCE', true)) === 'false') return false;
+        if (!String(this.configService.get('WEBAUTHN_RP_ID', '') ?? '').trim()) return false;
+        return this.hasActivePasskeys(userId);
+    }
+
+    /**
+     * Completes a login whose proof was a verified passkey assertion (checked by `PasskeysService`).
+     * A passkey cannot be guessed, so the TOTP brute-force lockout does not apply to it - and a valid
+     * passkey login clears any lockout an attacker may have provoked with wrong codes.
+     */
+    async completePasskeyLogin(userId: string, context: AuditContext) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, workEmail: true, status: true },
+        });
+        if (!user || user.status !== UserStatus.ACTIVE) {
+            throw new UnauthorizedException('Invalid credentials.');
+        }
+        await this.prisma.user.update({
+            where: { id: user.id },
+            data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+        });
+        await this.auditLog.log({
+            action: AUDIT_ACTIONS.PASSKEY_LOGIN,
+            actorId: user.id,
+            targetType: AUDIT_TARGETS.USER,
+            targetId: user.id,
+            context,
+        });
+        return this.issueTokens(user.id, user.workEmail);
+    }
+
+    /**
+     * Short-lived (10 min) session proven only by a recovery code. No permissions, no refresh token:
+     * `JwtAuthGuard` refuses it everywhere except on routes marked `@AllowRecoveryScope()`.
+     */
+    private issueRecoveryScopedSession(userId: string, email: string) {
+        const accessToken = this.jwtService.sign(
+            { sub: userId, email, permissions: [], scope: 'recovery' },
+            { expiresIn: '10m' },
+        );
+        return { accessToken, recoveryOnly: true as const };
+    }
+
     private async issueTokens(userId: string, email: string) {
         // 1. Retrieve aggregated user permissions for JWT payload claims
         const permissions = await this.getPermissionsForUser(userId);

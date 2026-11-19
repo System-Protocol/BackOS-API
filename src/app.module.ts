@@ -4,11 +4,14 @@ import { configuration } from './config';
 import { validationSchema } from './config/env.validation';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { RedisThrottlerStorage } from './common/throttler/redis-throttler-storage';
+import { RedisThrottlerStorageModule } from './common/throttler/redis-throttler-storage.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { EmailModule } from './email/email.module';
 import { AuthModule } from './auth/auth.module';
+import { PasskeysModule } from './passkeys/passkeys.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { UsersModule } from './users/users.module';
 import { PermissionsGuard } from './common/guards/permissions.guard';
@@ -77,13 +80,23 @@ import { FeaturesModule } from './features/features.module';
         //   - FilesController     (file uploads - disk I/O and storage cost)
         // Every other route (GET lists, polling endpoints, etc.) is no longer throttled at
         // all, which is what normal, legitimate traffic needs.
-        ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
+        // SECURITY (step 2): counters live in Redis (shared across instances, survive restarts) instead of
+        // the memory of one process. See `RedisThrottlerStorage` (falls back to memory if Redis is down).
+        ThrottlerModule.forRootAsync({
+            imports: [RedisThrottlerStorageModule],
+            inject: [RedisThrottlerStorage],
+            useFactory: (storage: RedisThrottlerStorage) => ({
+                throttlers: [{ ttl: 60_000, limit: 20 }],
+                storage,
+            }),
+        }),
 
         PrismaModule,
 
         EmailModule,
 
         AuthModule,
+        PasskeysModule,
 
         UsersModule,
 

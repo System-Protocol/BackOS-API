@@ -5,6 +5,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import * as fs from 'fs';
 import { BackupService } from './backup.service';
 import { RequirePermissions } from '../common/decorators/require-permissions.decorator';
+import { RequireStepUp } from '../common/decorators/require-step-up.decorator';
 import { PERMISSIONS } from '../common/constants/permissions.constant';
 import { buildContentDisposition } from '../common/utils/content-disposition.util';
 import { streamFileToResponse } from '../common/utils/stream-file.util';
@@ -59,6 +60,7 @@ export class BackupController {
      * generation history, ...).
      */
     @RequirePermissions(PERMISSIONS.BACKUP_MANAGE)
+    @RequireStepUp()
     @Post('orchestrator')
     async dumpOrchestrator(@CurrentUser('userId') actorId: string, @Res() res: Response) {
         const dump = await this.backupService.dumpOrchestratorDatabase();
@@ -70,6 +72,7 @@ export class BackupController {
      * Dumps and downloads a single generated platform's own database.
      */
     @RequirePermissions(PERMISSIONS.BACKUP_MANAGE)
+    @RequireStepUp()
     @Post('platforms/:platformId')
     async dumpPlatform(
         @CurrentUser('userId') actorId: string,
@@ -99,6 +102,7 @@ export class BackupController {
      * (see `cleanup.service.ts`) as a backstop for dumps nobody ever downloads.
      */
     @RequirePermissions(PERMISSIONS.BACKUP_MANAGE)
+    @RequireStepUp()
     @Post('platforms')
     async dumpAllPlatforms(@CurrentUser('userId') actorId: string) {
         const { succeeded, failed } = await this.backupService.dumpAllPlatformDatabases();
@@ -116,6 +120,7 @@ export class BackupController {
      * (never trusted as a raw path), so this cannot be used to read arbitrary files off disk.
      */
     @RequirePermissions(PERMISSIONS.BACKUP_MANAGE)
+    @RequireStepUp()
     @Get('download')
     async download(@CurrentUser('userId') actorId: string, @Query('fileName') fileName: string, @Res() res: Response) {
         const filePath = this.backupService.resolveDumpPath(fileName);

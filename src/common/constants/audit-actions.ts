@@ -21,6 +21,16 @@ export const SYSTEM_AUDIT_ACTIONS = {
     // supplied when confirming a destructive self-service action such as `DELETE /users/me`.
     STEP_UP_FAILED: 'auth.step-up.failed',
 
+    // Passkeys (WebAuthn)
+    PASSKEY_REGISTERED: 'auth.passkey.registered',
+    PASSKEY_REVOKED: 'auth.passkey.revoked',
+    PASSKEY_LOGIN: 'auth.passkey.login',
+    PASSKEY_LOGIN_FAILED: 'auth.passkey.login.failed',
+    PASSKEY_STEP_UP: 'auth.passkey.step-up',
+    PASSKEY_CLONE_SUSPECTED: 'auth.passkey.clone-suspected',
+    PASSKEYS_RESET_BY_ADMIN: 'auth.passkey.reset-by-admin',
+    LOGIN_DOWNGRADE_BLOCKED: 'auth.login.downgrade-blocked',
+
     // User
     USERS_REACTIVATE: 'users.reactivate',
     USERS_DISABLE: 'users.disable',
@@ -121,6 +131,16 @@ export const SYSTEM_AUDIT_DESCRIPTIONS: Record<SystemAuditAction, string> = {
     [SYSTEM_AUDIT_ACTIONS.REFRESH_TOKEN_CREATED]: 'A new refresh token was issued',
     [SYSTEM_AUDIT_ACTIONS.REFRESH_TOKEN_REVOKED]: 'A refresh token was explicitly revoked',
     [SYSTEM_AUDIT_ACTIONS.STEP_UP_FAILED]: 'A step-up re-authentication attempt for a destructive action failed',
+    [SYSTEM_AUDIT_ACTIONS.PASSKEY_REGISTERED]: 'A passkey was registered on an account',
+    [SYSTEM_AUDIT_ACTIONS.PASSKEY_REVOKED]: 'A passkey was revoked',
+    [SYSTEM_AUDIT_ACTIONS.PASSKEY_LOGIN]: 'User successfully authenticated with a passkey',
+    [SYSTEM_AUDIT_ACTIONS.PASSKEY_LOGIN_FAILED]: 'A passkey login attempt failed',
+    [SYSTEM_AUDIT_ACTIONS.PASSKEY_STEP_UP]: 'A passkey step-up re-authentication succeeded',
+    [SYSTEM_AUDIT_ACTIONS.PASSKEY_CLONE_SUSPECTED]:
+        'A passkey signature counter went backwards: the authenticator may have been cloned (passkey revoked)',
+    [SYSTEM_AUDIT_ACTIONS.PASSKEYS_RESET_BY_ADMIN]: "An administrator revoked all of a user's passkeys",
+    [SYSTEM_AUDIT_ACTIONS.LOGIN_DOWNGRADE_BLOCKED]:
+        'A TOTP-only login was refused because the account has a passkey (downgrade attempt)',
 
     [SYSTEM_AUDIT_ACTIONS.USERS_REACTIVATE]: 'Reactivate a user',
     [SYSTEM_AUDIT_ACTIONS.USERS_DISABLE]: 'Disable a user',

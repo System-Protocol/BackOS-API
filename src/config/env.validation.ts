@@ -55,7 +55,52 @@ export const validationSchema = Joi.object({
         .messages({
             'string.pattern.base': 'ENCRYPTION_KEY must be exactly 64 hexadecimal characters (openssl rand -hex 32).',
         }),
+    // Step 2 (key rotation): the previous key, only while rotating. Must differ from the current one.
+    ENCRYPTION_KEY_PREVIOUS: Joi.string()
+        .pattern(/^[0-9a-fA-F]{64}$/)
+        .invalid(Joi.ref('ENCRYPTION_KEY'))
+        .allow('')
+        .optional()
+        .messages({
+            'string.pattern.base': 'ENCRYPTION_KEY_PREVIOUS must be exactly 64 hexadecimal characters.',
+            'any.invalid': 'ENCRYPTION_KEY_PREVIOUS must be different from ENCRYPTION_KEY.',
+        }),
     BCRYPT_SALT_ROUNDS: Joi.number().default(12),
+
+    // Step 2: require a fresh TOTP code (header X-TOTP-Code) on sensitive routes - see @RequireStepUp().
+    // Only set it to false temporarily, while the front end is being updated to send the header.
+    STEP_UP_REQUIRED: Joi.boolean().default(true),
+
+    // ---- Passkeys (WebAuthn) - step 3. Leave WEBAUTHN_RP_ID empty to keep the feature switched off.
+    // RP ID = the domain the passkeys are bound to (e.g. "localhost", or "control.example.org").
+    // It can NOT be changed later without invalidating every registered passkey.
+    WEBAUTHN_RP_ID: Joi.string()
+        .pattern(/^(localhost|([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})$/i)
+        .allow('')
+        .optional()
+        .messages({ 'string.pattern.base': 'WEBAUTHN_RP_ID must be a bare domain name (no scheme, port or path).' }),
+    WEBAUTHN_RP_NAME: Joi.string().max(64).default('BACKOS Control'),
+    // Comma-separated EXACT origins allowed to run the ceremony (scheme + host + port, no path).
+    WEBAUTHN_ORIGINS: Joi.string()
+        .pattern(/^https?:\/\/[^\s/,]+(,\s*https?:\/\/[^\s/,]+)*$/)
+        .when('WEBAUTHN_RP_ID', {
+            is: Joi.string().min(1).required(),
+            then: Joi.required(),
+            otherwise: Joi.optional().allow(''),
+        })
+        .messages({
+            'string.pattern.base':
+                'WEBAUTHN_ORIGINS must be a comma-separated list of origins such as http://localhost:3000.',
+            'any.required': 'WEBAUTHN_ORIGINS is required when WEBAUTHN_RP_ID is set.',
+        }),
+    // Once an account has a passkey, TOTP-only login and TOTP step-up are refused for it (no downgrade).
+    PASSKEY_ENFORCE: Joi.boolean().default(true),
+    // Refuse synced passkeys (iCloud/Google/password-manager): only hardware-bound credentials are accepted.
+    PASSKEY_REQUIRE_DEVICE_BOUND: Joi.boolean().default(false),
+    PASSKEY_MAX_PER_USER: Joi.number().integer().min(1).max(25).default(10),
+    // Also refuse TOTP on the "internal login" of GENERATED backends for accounts that own a passkey.
+    // Off by default: those backends cannot run a passkey ceremony, so enabling it locks such users out of them.
+    PASSKEY_BLOCK_GENERATED_BACKEND_TOTP: Joi.boolean().default(false),
 
     // --- JWT & REFRESH TOKENS ---
     JWT_SECRET: Joi.string().min(32).required(),
@@ -193,15 +238,28 @@ export const validationSchema = Joi.object({
     // variables each feature declares, are checked by the `.custom()` step below, once every
     // feature has been discovered. See src/features/README.md.
     ENABLED_FEATURES: Joi.string().allow('').optional(),
-}).custom((value, helpers) => {
-    // Runs after the core variables above were validated. Discovering the features here, and
-    // not when this file is imported, avoids a circular import: a feature may import from
-    // `../../config` like any other module.
-    const { value: featureValues, errors } = validateFeatureEnv(value);
 
-    if (errors.length > 0) {
-        return helpers.message({ custom: errors.join(' ') });
-    }
+    // --- HTTPS (LAN stack) ---
+    // Files written by the `tls-init` job (src/tools/lan-tls). Both or neither: set => the API serves HTTPS itself.
+    TLS_KEY_FILE: Joi.string().optional(),
+    TLS_CERT_FILE: Joi.string().optional(),
+    // Docker volume holding the PUBLIC certificate of that CA (ca.crt). Generated backends mount it read-only
+    // and trust it (NODE_EXTRA_CA_CERTS) so they can call this API over HTTPS. Never contains a private key.
+    GENERATED_BACKEND_CA_VOLUME: Joi.string()
+        .pattern(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/)
+        .allow('')
+        .optional(),
+})
+    .and('TLS_KEY_FILE', 'TLS_CERT_FILE')
+    .custom((value, helpers) => {
+        // Runs after the core variables above were validated. Discovering the features here, and
+        // not when this file is imported, avoids a circular import: a feature may import from
+        // `../../config` like any other module.
+        const { value: featureValues, errors } = validateFeatureEnv(value);
 
-    return { ...value, ...featureValues };
-});
+        if (errors.length > 0) {
+            return helpers.message({ custom: errors.join(' ') });
+        }
+
+        return { ...value, ...featureValues };
+    });

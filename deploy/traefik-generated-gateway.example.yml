@@ -9,7 +9,19 @@
 #   1. Copie ce fichier dans deploy/traefik-dynamic/ (ex. generated-gateway.yml).
 #   2. Remplace api.REPLACE_ME.duckdns.org par TON domaine d'API (un second nom DuckDNS
 #      pointant vers la même IP publique suffit).
-#   3. Si Traefik ne le prend pas en compte (surveillance des fichiers peu fiable avec les
+#   3. L'API de la pile LAN sert maintenant du HTTPS avec une CA PRIVÉE : Traefik doit la connaître,
+#      sinon il refuse la connexion (erreur 500, par sécurité). Dans deploy/docker-compose.edge.yml, ajoute au service
+#      traefik le volume du certificat PUBLIC de cette CA (aucune clé), en lecture seule :
+#          services:
+#            traefik:
+#              volumes:
+#                - lan_ca:/lan-ca:ro
+#          volumes:
+#            lan_ca:
+#              external: true
+#              name: <PROJECT_NAME>-lan-tls-public      # créé par la pile LAN (docker-compose.lan.yml)
+#      La pile LAN doit avoir démarré au moins une fois pour que ce volume existe.
+#   4. Si Traefik ne le prend pas en compte (surveillance des fichiers peu fiable avec les
 #      dossiers montés sous Docker Desktop/Windows) : redémarre la pile edge.
 #
 # Ce qui n'est volontairement PAS routé : /api (l'API d'administration BackOS), Swagger, tout
@@ -28,9 +40,19 @@ http:
       tls:
         certResolver: letsencrypt
 
+  # Traefik vérifie le certificat de l'API de la pile LAN : il ne fait confiance qu'à NOTRE CA privée
+  # (jamais "insecureSkipVerify"). Cette CA ne peut certifier que des adresses privées et le nom
+  # host.docker.internal, qui figure dans le certificat de l'API.
+  serversTransports:
+    lan-orchestrator-tls:
+      rootCAs:
+        - /lan-ca/ca.crt
+      serverName: host.docker.internal
+
   services:
     lan-orchestrator:
       loadBalancer:
+        serversTransport: lan-orchestrator-tls
         servers:
-          # L'orchestrateur LAN publie 4803 sur l'hôte (docker-compose.lan.yml).
-          - url: "http://host.docker.internal:4803"
+          # L'orchestrateur LAN publie 4803 (HTTPS) sur l'hôte (docker-compose.lan.yml).
+          - url: "https://host.docker.internal:4803"

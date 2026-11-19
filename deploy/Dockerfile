@@ -102,7 +102,10 @@ COPY prisma.config.ts* ./
 # Configure startup script permissions and assign file ownership to 'app' user
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
-    && mkdir -p /app/generated /app/uploads /app/backups && chown -R app:app /app
+    && mkdir -p /app/generated /app/uploads /app/backups \
+    # LAN HTTPS (src/tools/lan-tls): created here so a NEW named volume inherits the 'app' ownership.
+    && mkdir -p /tls/ca /tls/server /tls/public \
+    && chown -R app:app /app /tls
 
 # Enforce Security Best Practice: Run container as non-root user
 USER app

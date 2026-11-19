@@ -3,11 +3,12 @@
 # ==============================================================================
 # Objectif : faire tourner l'orchestrateur + Postgres + Redis sur PC1, accessible
 # uniquement depuis ton réseau local (PC2, ton téléphone en wifi maison, etc.),
-# SANS Traefik, SANS domaine public, SANS certificat HTTPS.
+# SANS Traefik, SANS domaine public. HTTPS : l'API sert elle-même le TLS avec une CA PRIVÉE
+# (voir le service "tls-init" ci-dessous et docs/deployments/DEPLOIEMENT_LAN.md, section HTTPS).
 #
 # Différences volontaires par rapport à docker-compose.prod.yml :
 #   - Pas de réseau "edge" / Traefik : le port de l'appli est publié directement
-#     sur l'hôte (PC1), donc accessible via http://<IP-LAN-de-PC1>:4803
+#     sur l'hôte (PC1), donc accessible via https://<IP-LAN-de-PC1>:4803
 #   - Accès Docker : cette pile embarque son PROPRE docker-socket-proxy (service
 #     "docker-proxy", réseau privé "docker_api"). L'orchestrateur en a besoin pour
 #     construire/lancer les backends générés (DockerRuntimeManagerService). Il n'est
@@ -37,6 +38,16 @@ volumes:
     name: ${PROJECT_NAME}-lan-uploads
   backups_data:
     name: ${PROJECT_NAME}-lan-backups
+  # --- HTTPS (voir tls-init) : trois volumes séparés, un par niveau de sensibilité ---
+  # Clé PRIVÉE de la CA : montée UNIQUEMENT dans tls-init (job éphémère), jamais dans l'API.
+  tls_ca:
+    name: ${PROJECT_NAME}-lan-tls-ca
+  # Clé + certificat du serveur : montés en lecture seule dans l'API.
+  tls_server:
+    name: ${PROJECT_NAME}-lan-tls-server
+  # Certificat PUBLIC de la CA seul (aucune clé) : monté en lecture seule dans les backends générés.
+  tls_public:
+    name: ${PROJECT_NAME}-lan-tls-public
 
 services:
 
@@ -99,16 +110,43 @@ services:
       timeout: 3s
       retries: 3
 
-  orchestrator:
-    build:
+  # Job ÉPHÉMÈRE (s'arrête quand il a fini) : crée la CA privée au premier lancement, puis émet / renouvelle
+  # le certificat du serveur pour les adresses de LAN_TLS_IPS. Relancé à chaque démarrage de la pile ;
+  # il ne change rien tant que les adresses ne changent pas et que le certificat n'approche pas de la fin.
+  #  - aucun réseau (network_mode: none), système de fichiers en lecture seule, aucune capacité ;
+  #  - il ne reçoit PAS .env.lan : il ne voit aucun secret de la pile.
+  tls-init:
+    build: &orchestrator-build
       context: ..
       dockerfile: deploy/Dockerfile
       target: runtime
+    image: ${PROJECT_NAME}-orchestrator:lan
+    container_name: ${PROJECT_NAME}-lan-tls-init
+    entrypoint: ["node", "dist/src/tools/lan-tls/cli.js"]
+    command: ["ensure"]
+    restart: "no"
+    network_mode: none
+    environment:
+      LAN_TLS_IPS: "${LAN_TLS_IPS:?LAN_TLS_IPS must be set in .env.lan, for example 192.168.1.20,10.8.0.1 (the LAN address of PC1, then its WireGuard address)}"
+    volumes:
+      - tls_ca:/tls/ca
+      - tls_server:/tls/server
+      - tls_public:/tls/public
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+
+  orchestrator:
+    build: *orchestrator-build
     image: ${PROJECT_NAME}-orchestrator:lan
     container_name: ${PROJECT_NAME}-lan-orchestrator
     restart: unless-stopped
 
     depends_on:
+      tls-init:
+        condition: service_completed_successfully
       docker-proxy:
         condition: service_started
       postgres:
@@ -151,14 +189,24 @@ services:
       # Uploads dans un volume Docker nommé (aucun chemin hôte identique dans cette pile).
       GENERATED_BACKEND_UPLOADS_USE_VOLUME: "true"
 
+      # --- HTTPS : l'API sert elle-même le TLS (aucun proxy). Clé et certificat écrits par tls-init. ---
+      TLS_KEY_FILE: /tls/server/server.key
+      TLS_CERT_FILE: /tls/server/server.crt
+      # Les backends générés appellent BackOS en HTTPS (connexion interne) et font confiance à NOTRE CA
+      # (certificat public seulement, volume en lecture seule). host.docker.internal est dans le certificat.
+      GENERATED_BACKEND_BACKOS_URL: https://host.docker.internal:4803
+      GENERATED_BACKEND_CA_VOLUME: ${PROJECT_NAME}-lan-tls-public
+
     volumes:
       - uploads_data:/app/uploads
       - backups_data:/app/backups
       - generated_projects:/app/generated
+      # Lecture seule : l'API lit sa clé et son certificat mais ne peut pas les modifier, et n'a JAMAIS accès à la clé de la CA.
+      - tls_server:/tls/server:ro
 
     # ⚠️ C'est cette ligne qui rend le backend accessible depuis PC2 :
     # "4803:4803" publie le port sur TOUTES les interfaces réseau de PC1
-    # (donc joignable via l'IP LAN de PC1, ex: http://192.168.1.42:4803)
+    # (donc joignable via l'IP LAN de PC1, ex: https://192.168.1.42:4803)
     ports:
       - "4803:4803"
 
@@ -176,7 +224,9 @@ services:
       - ALL
 
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||4803)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      # HTTPS vérifié pour de vrai : le fichier du serveur contient la chaîne (certificat + CA), utilisée comme
+      # ancre de confiance ; 127.0.0.1 est dans les adresses certifiées. Aucune vérification n'est désactivée.
+      test: ["CMD", "node", "-e", "const f=require('fs');require('https').get({host:'127.0.0.1',port:process.env.PORT||4803,path:'/api/health',ca:f.readFileSync(process.env.TLS_CERT_FILE)},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 3s
       start_period: 30s

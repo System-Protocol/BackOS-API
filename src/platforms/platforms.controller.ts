@@ -7,6 +7,7 @@ import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../common/decorators/require-permissions.decorator';
+import { RequireStepUp } from '../common/decorators/require-step-up.decorator';
 import { PERMISSIONS } from '../common/constants/permissions.constant';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { MessagesService } from '../messages/messages.service';
@@ -97,6 +98,7 @@ export class PlatformsController {
      * that hasn't at least passed through the reversible archived state.
      * * @route DELETE /platforms/:id/permanent
      */
+    @RequireStepUp()
     @Delete(':id/permanent')
     purge(@CurrentUser() actor: Actor, @Param('id') id: string) {
         return this.platformsService.purge(actor, id);
@@ -106,6 +108,7 @@ export class PlatformsController {
      * Transfers platform primary ownership to another user.
      * * @route POST /platforms/:id/transfer-ownership
      */
+    @RequireStepUp()
     @Post(':id/transfer-ownership')
     transferOwnership(@CurrentUser() actor: Actor, @Param('id') id: string, @Body() dto: TransferOwnershipDto) {
         return this.platformsService.transferOwnership(actor, id, dto);

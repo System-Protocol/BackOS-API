@@ -1,6 +1,7 @@
-import { Injectable, ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
+import { ALLOW_RECOVERY_SCOPE_KEY } from '../decorators/allow-recovery-scope.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 /**
@@ -34,5 +35,24 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
         // Delegates authentication to Passport's default 'jwt' strategy pipeline for protected routes.
         return super.canActivate(context);
+    }
+
+    /**
+     * SECURITY (step 3): a token with `scope: 'recovery'` (issued after a recovery-code login on an
+     * account that owns passkeys) is only valid on routes explicitly marked `@AllowRecoveryScope()`.
+     * This is an allow-list, so every route added in the future is closed to it by default.
+     */
+    handleRequest<TUser = any>(err: any, user: any, info: any, context: ExecutionContext, status?: any): TUser {
+        const authenticated = super.handleRequest(err, user, info, context, status);
+        if (authenticated?.scope === 'recovery') {
+            const allowed = this.reflector.getAllAndOverride<boolean>(ALLOW_RECOVERY_SCOPE_KEY, [
+                context.getHandler(),
+                context.getClass(),
+            ]);
+            if (!allowed) {
+                throw new ForbiddenException('Recovery session: register a new passkey first.');
+            }
+        }
+        return authenticated as TUser;
     }
 }

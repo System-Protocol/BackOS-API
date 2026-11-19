@@ -45,7 +45,7 @@ $startItem  = $menu.Items.Add("Start")
 $stopItem   = $menu.Items.Add("Stop")
 [void]$menu.Items.Add("-")
 $logsItem   = $menu.Items.Add("View logs")
-$healthItem = $menu.Items.Add("Test http://localhost:4803/api/health")
+$healthItem = $menu.Items.Add("Check API health (HTTPS)")
 [void]$menu.Items.Add("-")
 $exitItem   = $menu.Items.Add("Exit (only hides the icon)")
 $notifyIcon.ContextMenuStrip = $menu
@@ -62,6 +62,8 @@ function Get-BackendStatus {
         foreach ($line in $lines) {
             try {
                 $obj = $line | ConvertFrom-Json
+                # "tls-init" is a one-shot job: it exits normally once the certificates are ready.
+                if ($obj.Service -eq "tls-init") { continue }
                 if ($obj -is [array]) { $states += $obj.State } else { $states += $obj.State }
             } catch {}
         }
@@ -144,15 +146,24 @@ $stopItem.Add_Click({
 $logsItem.Add_Click({
     Start-Process powershell -ArgumentList "-NoExit","-Command","cd `"$ProjectRoot`"; docker compose -f `"$ComposeFile`" --env-file `"$EnvFile`" logs -f orchestrator"
 })
-$healthItem.Add_Click({
-    Start-Process "http://localhost:4803/api/health"
-})
+# The API uses a PRIVATE certificate that Windows does not know (and must not be asked to trust): instead of
+# opening a browser on a certificate warning, ask Docker, which runs a REAL verified HTTPS check inside the container.
+function Show-ApiHealth {
+    $health = "unknown"
+    try {
+        $raw = & docker compose -f $ComposeFile --env-file $EnvFile ps orchestrator --format json 2>$null
+        if ($raw) { $health = ($raw -split "`r?`n" | Where-Object { $_.Trim() -ne "" } | Select-Object -First 1 | ConvertFrom-Json).Health }
+        if (-not $health) { $health = "starting" }
+    } catch {}
+    $notifyIcon.ShowBalloonTip(4000, "BACKOS API", "Health (HTTPS check): $health", [System.Windows.Forms.ToolTipIcon]::Info)
+}
+$healthItem.Add_Click({ Show-ApiHealth })
 $exitItem.Add_Click({
     $notifyIcon.Visible = $false
     [System.Windows.Forms.Application]::Exit()
 })
 $notifyIcon.Add_DoubleClick({
-    if ((Get-BackendStatus) -eq "running") { Start-Process "http://localhost:4803/api/health" }
+    if ((Get-BackendStatus) -eq "running") { Show-ApiHealth }
 })
 
 $refreshTimer = New-Object System.Windows.Forms.Timer

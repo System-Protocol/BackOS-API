@@ -4,12 +4,18 @@ import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { certificateDaysLeft, loadHttpsOptions, tlsFilesFromEnv, watchTlsFiles } from './config/tls';
 
 async function bootstrap() {
     // OPS-007: LOG_FORMAT=json switches to structured JSON logs (one object per line), easier to
     // ship to a log pipeline; the default human-readable format is kept for development.
+    // LAN stack: the API serves HTTPS itself when TLS_KEY_FILE / TLS_CERT_FILE are set (see docker-compose.lan.yml).
+    const tlsFiles = tlsFilesFromEnv();
+    const httpsOptions = tlsFiles ? loadHttpsOptions(tlsFiles) : undefined;
+
     const app = await NestFactory.create(AppModule, {
         logger: process.env.LOG_FORMAT === 'json' ? new ConsoleLogger({ json: true }) : undefined,
+        httpsOptions,
     });
 
     // Without this, a SIGTERM (deploy, `docker stop`, `pm2 reload`, ...) kills the process
@@ -47,7 +53,19 @@ async function bootstrap() {
 
     await app.listen(port);
 
-    Logger.log(`back-os Backend listening on ${port}`, 'Bootstrap');
+    if (tlsFiles && httpsOptions) {
+        const daysLeft = Math.floor(certificateDaysLeft(httpsOptions.cert));
+        if (daysLeft < 30) {
+            Logger.warn(
+                `The TLS certificate expires in ${daysLeft} days: restart the stack so it is renewed.`,
+                'Bootstrap',
+            );
+        }
+        // A renewed certificate (written by tls-init) is picked up without a restart.
+        watchTlsFiles(app.getHttpServer(), tlsFiles);
+    }
+
+    Logger.log(`back-os Backend listening on ${tlsFiles ? 'https' : 'http'}://:${port}`, 'Bootstrap');
 }
 
 void bootstrap();

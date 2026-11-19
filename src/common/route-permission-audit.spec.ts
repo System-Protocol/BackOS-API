@@ -188,6 +188,17 @@ const MANUALLY_CHECKED_ROUTES: Record<string, Record<string, string>> = {
         getAvatar:
             "Any authenticated user may view any team member's avatar - equivalent to a company directory photo, not sensitive data (global JwtAuthGuard is sufficient).",
     },
+    'passkeys/passkeys.controller.ts': {
+        registerOptions:
+            'Own account only (CurrentUser): enrols a passkey for the caller. Guarded by @RequireStepUp() (passkey token or TOTP); the only token without full scope allowed here is the recovery session.',
+        registerVerify:
+            "Own account only (CurrentUser): the single-use challenge is bound to the caller's userId (checked in PasskeysService.finishRegistration).",
+        stepUpOptions: "Own account only (CurrentUser): challenge restricted to the caller's own passkeys.",
+        stepUpVerify:
+            'Own account only (CurrentUser): the single-use challenge and the passkey must both belong to the caller (PasskeysService.finishStepUp).',
+        list: "Own account only (CurrentUser): lists the caller's own passkeys.",
+        revoke: 'Own account only (CurrentUser): the passkey must belong to the caller, the last one cannot be removed, and @RequireStepUp() applies.',
+    },
     'auth/auth.controller.ts': {
         logout: "Requires a valid access token (global JwtAuthGuard); revokes only the caller's own refresh token, never another user's.",
     },

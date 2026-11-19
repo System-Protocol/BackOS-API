@@ -194,7 +194,7 @@ In your router's administration page, set up port forwarding to redirect **only*
 **Use case:** you generate your **portfolio's backend** with BackOS, and its front end is hosted elsewhere (Vercel, Netlify…). The visitors are strangers on the Internet: they are not in your WireGuard tunnel and cannot reach the LAN stack. Traefik can relay **only** `https://<api>/generated/<slug>/...` to the gateway of your LAN stack, which forwards it to the right backend.
 
 ```
-Visitor (Vercel front) ── HTTPS ──> Traefik (80/443) ──> host.docker.internal:4803
+Visitor (Vercel front) ── HTTPS ──> Traefik (80/443) ── HTTPS (private CA) ──> host.docker.internal:4803
                                      only /generated/ is relayed         │
                                                                          ▼
                                                    gateway of the LAN API
@@ -205,7 +205,7 @@ Visitor (Vercel front) ── HTTPS ──> Traefik (80/443) ──> host.docker
 ### Set it up
 
 1. **A second domain name** for the API (for example a second DuckDNS name pointing to the same public IP as the demo). Traefik issues one certificate per name.
-2. Copy `deploy/traefik-generated-gateway.example.yml` to `deploy/traefik-dynamic/` (for example as `generated-gateway.yml`) and replace `api.REPLACE_ME.duckdns.org` with your API domain. If Traefik does not pick it up (file watching is unreliable with folders mounted under Docker Desktop on Windows), restart it: `docker restart <PROJECT_NAME>-edge-traefik`.
+2. Copy `deploy/traefik-generated-gateway.example.yml` to `deploy/traefik-dynamic/` (for example as `generated-gateway.yml`) and replace `api.REPLACE_ME.duckdns.org` with your API domain. If Traefik does not pick it up (file watching is unreliable with folders mounted under Docker Desktop on Windows), restart it: `docker restart <PROJECT_NAME>-edge-traefik`. **Because the LAN API now serves HTTPS with a private CA, Traefik must also be given that CA's public certificate**: follow step 3 in the header of that example file (a read-only volume, no key), otherwise Traefik refuses the connection.
 3. In BackOS, open the portfolio's platform and fill in its **URL** field with the front end's address (for example `https://my-portfolio.vercel.app`). That URL, together with BackOS's own front-end address (`FRONTEND_URL`), forms the list of **allowed CORS origins** of the generated backend.
 4. In the Vercel front end, the API URL becomes `https://<api-domain>/generated/<slug>`. **HTTPS is mandatory**: a Vercel page cannot call `http://` without the browser blocking it.
 5. Generate (or regenerate) the platform, then start it from BackOS.
@@ -232,8 +232,8 @@ PC2 only runs the front-end application (an icon on the desktop). Set its API UR
 
 | Where PC2 is                    | API URL to use                                                                   |
 | ------------------------------- | -------------------------------------------------------------------------------- |
-| On the **same local network**   | PC1's local address, for example `http://192.168.1.x:4803`                       |
-| **Elsewhere**                   | PC1's WireGuard address, for example `http://10.8.0.1:4803`, once the tunnel of [section 4](#4-wireguard-your-remote-access-to-the-lan-stack) is up on PC2 |
+| On the **same local network**   | PC1's local address, for example `https://192.168.1.x:4803`                       |
+| **Elsewhere**                   | PC1's WireGuard address, for example `https://10.8.0.1:4803` (list both addresses in `LAN_TLS_IPS`), once the tunnel of [section 4](#4-wireguard-your-remote-access-to-the-lan-stack) is up on PC2 |
 
 **Demo or work mode** depends only on the **account you sign in with** from this front end: the `demo` account's credentials (section 3) for a safe read-only tour of the **demo** instance, your work account's credentials for the real instance. The two instances are different back ends: the demo's address is `https://<DEMO_DOMAIN>`, the real one is PC1's LAN address. The role attached to the account decides the permissions, on the back-end side.
 

@@ -27,7 +27,7 @@ Once the tunnel is up, your device reaches the server through its **private tunn
 
 | Stack you reach through the tunnel | Address of its API                                |
 | ---------------------------------- | ------------------------------------------------- |
-| [LAN](DEPLOIEMENT_LAN.md)          | `http://10.8.0.1:4803`                            |
+| [LAN](DEPLOIEMENT_LAN.md)          | `https://10.8.0.1:4803`                           |
 | [Local](DEPLOIEMENT_LOCAL.md)      | `http://10.8.0.1:<LOCAL_PORT>`                    |
 
 (Both stacks publish their port on every network interface of the server, the tunnel included. For a public production, see [Production + WireGuard](combines/DEPLOIEMENT_COMBINE_PRODUCTION_WIREGUARD.md): there, WireGuard protects the administration tools, not the application.)
@@ -184,7 +184,7 @@ Skip this step if you only use the API. If you also run the BackOS **web interfa
 - **Front end:** in the **front-end project**, set the API address in its settings file (`.env.local` there), for the [LAN](DEPLOIEMENT_LAN.md) stack:
 
   ```ini
-  NEXT_PUBLIC_API_URL=http://10.8.0.1:4803/api
+  NEXT_PUBLIC_API_URL=https://10.8.0.1:4803/api
   ```
 
   This value is **baked into the build**, so rebuild the front end after changing it. In the front-end project:
@@ -203,7 +203,7 @@ If the front end runs on the server, open `http://10.8.0.1:3000` from a device c
 
 1. Switch the WireGuard tunnel **on** on a device. For a real test, be **outside your Wi-Fi** (4G, for example).
 2. `ping 10.8.0.1` should answer.
-3. Open `http://10.8.0.1:4803/api/health` (the API of the [LAN](DEPLOIEMENT_LAN.md) stack; use your `LOCAL_PORT` for [Local](DEPLOIEMENT_LOCAL.md)). It must answer `200`.
+3. Open `https://10.8.0.1:4803/api/health` (the API of the [LAN](DEPLOIEMENT_LAN.md) stack, which serves HTTPS: add `10.8.0.1` to `LAN_TLS_IPS` in `.env.lan` and trust its certificate as explained in [LAN, section 4b](DEPLOIEMENT_LAN.md#4b-trust-the-certificate-on-your-devices-https); the tunnel already encrypts the traffic, the certificate lets you verify you reached the real server; use your `LOCAL_PORT` for [Local](DEPLOIEMENT_LOCAL.md)). It must answer `200`.
 4. If you run the front end, open it (for example `http://10.8.0.1:3000`): the BackOS sign-in page should appear.
 
 ✅ If it does, your private instance is now reachable from anywhere, and still invisible to the Internet.
@@ -226,7 +226,7 @@ The configuration format is identical on Windows, Linux and macOS: the server fi
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | The tunnel switches on but nothing answers                 | The device's public key is missing from the server file, or the tunnel was not reloaded on the server (step 4.4). Also check the **`Endpoint`** name and the router's UDP forwarding. |
 | `ping 10.8.0.1` fails, but the app shows a recent handshake | A server firewall may block ping. Try opening the BackOS address directly.                                                                                      |
-| The ping works but `http://10.8.0.1:4803` does not         | On a Windows server, the firewall may block incoming connections on port `4803` for the WireGuard network. Allow that port for this network, and only for it.   |
+| The ping works but `https://10.8.0.1:4803` does not         | On a Windows server, the firewall may block incoming connections on port `4803` for the WireGuard network. Allow that port for this network, and only for it.   |
 | It worked, and now your device cannot connect              | Your public IP changed and the DNS name was not updated. Check the DuckDNS update script or cron job (step 1).                                                  |
 | Two devices disturb each other                             | They use the **same tunnel address**. Give each device its own (`10.8.0.2`, `10.8.0.3`…).                                                                       |
 | Nothing works from outside, while it works at home         | UDP `51820` is not forwarded, the rule points to the wrong local IP, or you are behind CGNAT.                                                                   |

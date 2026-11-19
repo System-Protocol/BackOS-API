@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PlatformGatewayService } from '../gateway/platform-gateway.service';
 import { GENERATED_BACKEND_API_PREFIX, GENERATED_BACKEND_CONTAINER_PORT } from './generated-backend.constants';
 import { redactSecrets } from '../common/utils/command-runner.util';
+import { caTrustSettings } from './ca-trust.util';
 
 const DOCKER_COMMAND_TIMEOUT_MS = 60_000;
 const DOCKER_BUILD_TIMEOUT_MS = 15 * 60_000;
@@ -333,11 +334,14 @@ export class DockerRuntimeManagerService {
         if (containerEnv.DATABASE_URL) {
             containerEnv.DATABASE_URL = this.dockerReachableDatabaseUrl(containerEnv.DATABASE_URL);
         }
+        // LAN stack: the BackOS API serves HTTPS with a private CA; the container trusts that CA (public cert only).
+        const caTrust = caTrustSettings(this.configService.get<string>('GENERATED_BACKEND_CA_VOLUME'));
         Object.assign(containerEnv, {
             PORT: String(GENERATED_BACKEND_CONTAINER_PORT),
             HOST: '0.0.0.0',
             API_DOCS_ENABLED: String(apiDocsEnabled),
             UPLOADS_DIR: '/app/uploads',
+            ...caTrust.env,
         });
         const dockerEnvFile = path.join(projectPath, '.env.docker');
         await fsp.writeFile(
@@ -381,6 +385,7 @@ export class DockerRuntimeManagerService {
             '/tmp:rw,size=64m',
             '-v',
             `${useUploadsVolume ? `${name}-uploads` : uploadsHostDir}:/app/uploads:rw`,
+            ...caTrust.dockerArgs,
             '--security-opt',
             'no-new-privileges',
             '--env-file',

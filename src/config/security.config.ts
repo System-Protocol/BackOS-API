@@ -14,6 +14,12 @@ export default registerAs('security', () => ({
     encryptionKey: process.env.ENCRYPTION_KEY,
 
     /**
+     * Optional. The PREVIOUS 256-bit key, set only during a key rotation (see
+     * `prisma/rotate-encryption-key.ts`): data encrypted with it stays readable until it is migrated.
+     */
+    encryptionKeyPrevious: process.env.ENCRYPTION_KEY_PREVIOUS || undefined,
+
+    /**
      * Login brute-force protection settings.
      *
      * WHY THIS EXISTS: the invitation-consumption flow already limited failed attempts

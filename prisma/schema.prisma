@@ -202,6 +202,7 @@ model User {
   platformMemberships     PlatformMember[]        @relation("PlatformMemberUser")
   platformRemovalRequests PlatformMember[]        @relation("PlatformMemberRemovalRequestedBy")
   files                   FileAsset[]
+  passkeys                UserPasskey[]
   plannings               Planning[]              @relation("PlanningResponsible")
   planningMemberships     PlanningMember[]
   createdPlanningEntries  PlanningEntry[]         @relation("PlanningEntryCreator")
@@ -280,6 +281,29 @@ model Invitation {
 
   @@index([userId])
   @@map("invitations")
+}
+
+model UserPasskey {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  credentialId  String    @unique
+  publicKey     Bytes
+  counter       BigInt    @default(0)
+  transports    String[]
+  deviceType    String
+  backedUp      Boolean   @default(false)
+  aaguid        String?
+  name          String
+
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  revokedReason String?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@map("user_passkeys")
 }
 
 model UserMfa {

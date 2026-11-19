@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
+import { JWT_ALGORITHM, JWT_AUDIENCE, JWT_ISSUER } from '../jwt.constants';
 
 /**
  * Passport strategy responsible for validating JSON Web Tokens (JWT)
@@ -34,6 +35,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             // Enforces token expiration checks; requests with expired JWTs will automatically be rejected (401 Unauthorized).
             ignoreExpiration: false,
 
+            // SECURITY (step 2): pin algorithm, issuer and audience (see ../jwt.constants.ts).
+            algorithms: [JWT_ALGORITHM],
+            issuer: JWT_ISSUER,
+            audience: JWT_AUDIENCE,
+
             // Retrieves the secret key used to verify the cryptographic signature of the token.
             // Using getOrThrow guarantees the app crashes at startup if the JWT secret is missing.
             secretOrKey: configService.getOrThrow<string>('jwt.secret'),
@@ -55,7 +61,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
      * * @param payload - The decoded JSON payload contained within the JWT.
      * @returns An object representing the authenticated user context, which NestJS automatically attaches to `req.user`.
      */
-    async validate(payload: { sub: string; email: string; permissions: string[] }) {
+    async validate(payload: { sub: string; email: string; permissions: string[]; scope?: string }) {
         if (!(await this.isActive(payload.sub))) {
             throw new UnauthorizedException('Session no longer valid.');
         }
@@ -63,6 +69,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             userId: payload.sub, // 'sub' (subject) is the standard JWT claim representing the unique user ID
             email: payload.email,
             permissions: payload.permissions,
+            // 'recovery' = restricted session (see JwtAuthGuard / @AllowRecoveryScope()); absent = full session.
+            scope: payload.scope,
         };
     }
 
