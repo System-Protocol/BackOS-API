@@ -70,6 +70,7 @@ cp .env.demo.example       .env.demo         # demo sub-domain, secrets of its o
 Fill in both files (see [Production](../DEPLOIEMENT_PRODUCTION.md#1-create-your-settings-file) and [Demo](../DEPLOIEMENT_DEMO.md#1-create-your-settings-file)). Three rules specific to running both:
 
 - **`PROJECT_NAME` must be the same in both files.** They share one Traefik network, named `${PROJECT_NAME}-edge`.
+- **`.env.production` must also contain `DEMO_DOMAIN`** (the same value as in `.env.demo`). The shared Traefik reads its routes from `.env.production` (`PROD_DOMAIN` and `DEMO_DOMAIN`): without `DEMO_DOMAIN`, the demo route is not created and the demo answers 404.
 - **`ACME_EMAIL`** is read by Traefik from `.env.production`.
 - **Different secrets, passwords and folders** (`GENERATED_PROJECTS_HOST_PATH`) for the demo and for production.
 

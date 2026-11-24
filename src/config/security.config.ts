@@ -15,7 +15,7 @@ export default registerAs('security', () => ({
 
     /**
      * Optional. The PREVIOUS 256-bit key, set only during a key rotation (see
-     * `prisma/rotate-encryption-key.ts`): data encrypted with it stays readable until it is migrated.
+     * `src/tools/rotate-key/cli.ts`): data encrypted with it stays readable until it is migrated.
      */
     encryptionKeyPrevious: process.env.ENCRYPTION_KEY_PREVIOUS || undefined,
 

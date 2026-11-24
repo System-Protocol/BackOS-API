@@ -161,15 +161,9 @@ services:
     networks:
       - edge                     # Connected to external proxy network for web traffic
       - internal                 # Connected to private network for database/cache communication
-    labels:
-      # Traefik Reverse Proxy Configuration
-      - "traefik.enable=true"
-      - "traefik.docker.network=${PROJECT_NAME}-edge"
-      - "traefik.http.routers.${PROJECT_NAME}-demo.rule=Host(`${DEMO_DOMAIN}`)"
-      - "traefik.http.routers.${PROJECT_NAME}-demo.entrypoints=websecure"
-      - "traefik.http.routers.${PROJECT_NAME}-demo.tls.certresolver=letsencrypt"
-      - "traefik.http.services.${PROJECT_NAME}-demo.loadbalancer.server.port=4803"
-      
+    # No Traefik labels: the route to this container is declared in deploy/traefik-dynamic/10-demo.yml (Traefik no
+    # longer has access to the Docker daemon, so it cannot read labels).
+
     # Security Hardening (Container Isolation Best Practices)
     security_opt:
       - "no-new-privileges:true" # Prevents processes from gaining additional privileges via setuid

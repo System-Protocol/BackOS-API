@@ -1,0 +1,20 @@
+# Route of the PUBLIC PRODUCTION: created only when PROD_DOMAIN is set (see docker-compose.edge.yml).
+{{ if env "PROD_DOMAIN" }}
+http:
+  routers:
+    production:
+      rule: "Host(`{{ env "PROD_DOMAIN" }}`)"
+      entryPoints:
+        - websecure
+      middlewares:
+        - secure-headers@file
+      tls:
+        certResolver: letsencrypt
+      service: production
+  services:
+    production:
+      loadBalancer:
+        servers:
+          # Docker DNS name of the container, on the shared "edge" network. Container name set in docker-compose.prod.yml.
+          - url: "http://{{ env "PROJECT_NAME" }}-prod-orchestrator:4803"
+{{ end }}

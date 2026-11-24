@@ -189,15 +189,9 @@ services:
       - edge                     # Public routing access via Traefik
       - internal                 # Private communication with database and cache
       - docker_api               # Private link to this stack's docker-proxy
-    labels:
-      # Dynamic HTTP/HTTPS Routing Configuration via Traefik
-      - "traefik.enable=true"
-      - "traefik.docker.network=${PROJECT_NAME}-edge"
-      - "traefik.http.routers.${PROJECT_NAME}-prod.rule=Host(`${PROD_DOMAIN}`)"
-      - "traefik.http.routers.${PROJECT_NAME}-prod.entrypoints=websecure"
-      - "traefik.http.routers.${PROJECT_NAME}-prod.tls.certresolver=letsencrypt"
-      - "traefik.http.services.${PROJECT_NAME}-prod.loadbalancer.server.port=4803"
-      
+    # No Traefik labels: the route to this container is declared in deploy/traefik-dynamic/20-production.yml (Traefik
+    # no longer has access to the Docker daemon, so it cannot read labels).
+
     # Security Hardening Protocol
     security_opt:
       - "no-new-privileges:true" # Prevents processes inside container from gaining host root rights

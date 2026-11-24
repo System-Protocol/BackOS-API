@@ -1,0 +1,20 @@
+# Route of the PUBLIC DEMO: created only when DEMO_DOMAIN is set (see docker-compose.edge.yml).
+{{ if env "DEMO_DOMAIN" }}
+http:
+  routers:
+    demo:
+      rule: "Host(`{{ env "DEMO_DOMAIN" }}`)"
+      entryPoints:
+        - websecure
+      middlewares:
+        - secure-headers@file
+      tls:
+        certResolver: letsencrypt
+      service: demo
+  services:
+    demo:
+      loadBalancer:
+        servers:
+          # Docker DNS name of the container, on the shared "edge" network. Container name set in docker-compose.demo.yml.
+          - url: "http://{{ env "PROJECT_NAME" }}-demo-orchestrator:4803"
+{{ end }}

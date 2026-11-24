@@ -21,7 +21,7 @@ A BackOS instance open to the Internet, with a **read-only `demo` account**, to 
 - **Nothing can bypass the guard silently.** `DEMO_WORKEMAIL` is **mandatory** in `.env.demo`: without it, `docker compose` refuses to start the demo stack.
 - **No access to Docker.** The demo container has no `DOCKER_HOST` and no `docker-socket-proxy` on the network it shares with Traefik. Even if someone found a code-execution flaw in that container, no technical path leads to the host's Docker API.
 - **Separate database.** The demo has its own PostgreSQL (with its own volume) and its own Redis. Nothing is shared with production.
-- **No accidental exposure.** Traefik only routes containers explicitly labelled `traefik.enable=true` (`exposedbydefault=false`). Its dashboard is disabled.
+- **No accidental exposure.** Traefik only serves the routes written in `deploy/traefik-dynamic/` (`10-demo.yml` for the demo): nothing is discovered automatically. Its dashboard is disabled, and it has **no access to the Docker daemon**.
 
 > [!NOTE]
 > The read-only guard applies to the **`demo` account only**. The stack also creates an **owner** account (like every stack), which can write: it is how you prepare what the visitors will see (see [step 5](#5-prepare-what-visitors-will-see)).
@@ -94,11 +94,12 @@ docker compose -p backos-demo -f deploy/docker-compose.demo.yml --env-file .env.
 make up-demo
 ```
 
-⚠️ `edge` **always reads `.env.production`**, so Way B needs that file to exist, even if you never run Production. For a demo-only server, create it with just these two lines (the same `PROJECT_NAME` as in `.env.demo`, and your e-mail):
+⚠️ `edge` **always reads `.env.production`**, so Way B needs that file to exist, even if you never run Production. For a demo-only server, create it with just these three lines (the same `PROJECT_NAME` as in `.env.demo`, your e-mail, and **the same demo domain**: Traefik reads it from this file to create the demo route):
 
 ```ini
 PROJECT_NAME=myproject
 ACME_EMAIL=admin@example.com
+DEMO_DOMAIN=demo.example.com
 ```
 
 Without it, `make up-demo` stops with *Required environment file '.env.production' is missing*.
@@ -166,6 +167,7 @@ Starting the stack creates the demo **account and role** (idempotent: it is chec
 | `make up-demo`: *Required environment file '.env.production' is missing* | `edge` reads `.env.production`. Create it (step 2, Way B) or use Way A.                                                                     |
 | *network … declared as external, but could not be found*       | `edge` is not running, or its `PROJECT_NAME` differs from the one in `.env.demo`. Start `edge` first, with the same `PROJECT_NAME`.                                      |
 | The demo container stops right after starting                  | A setting is missing or invalid. Check `docker logs <PROJECT_NAME>-demo-orchestrator`. Typical causes: `DEMO_TOTP_SECRET` or `DEMO_WORKEMAIL` empty, `ENCRYPTION_KEY` not 64 hexadecimal characters, `REDIS_PASSWORD` under 16 characters. |
+| `https://<DEMO_DOMAIN>` answers **404** while the demo container is running | Traefik does not know `DEMO_DOMAIN`, so it created no demo route. Way A: `--env-file .env.demo` was forgotten on the `edge` command. Way B: add `DEMO_DOMAIN=` to `.env.production`. Then `docker compose -p backos-edge -f deploy/docker-compose.edge.yml --env-file .env.demo up -d` again. |
 | No certificate, or a browser warning                           | The domain does not point to your public IP yet, or ports 80/443 are not reachable. Check the DNS record, the router forwarding, and the Traefik logs (step 3).        |
 | It works from your network but not from outside                | Port forwarding is missing, or you are behind CGNAT (see the warning above).                                                                                            |
 | The visitor cannot create or generate anything                 | This is the expected behaviour: the account is read-only, and the demo container has no Docker access.                                                                  |
