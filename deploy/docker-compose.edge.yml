@@ -5,7 +5,8 @@
 # Key Features:
 #   - Automated SSL certificate management via Let's Encrypt (ACME protocol).
 #   - Enforced HTTP-to-HTTPS automatic redirection.
-#   - Optional public routes via traefik-dynamic/ (e.g. one generated backend).
+#   - Routes declared in traefik-dynamic/ (demo, production, and optionally one generated backend).
+#   - NO access to the Docker daemon: Traefik reads routes from files only (see below).
 # ==============================================================================
 
 version: "3.8"
@@ -35,19 +36,25 @@ volumes:
 services:
 
   # ----------------------------------------------------------------------------
-  # Edge Reverse Proxy & TLS Termination: Traefik v3.1
+  # Edge Reverse Proxy & TLS Termination: Traefik (supported version, pinned)
   # ----------------------------------------------------------------------------
+  # Traefik ships security fixes almost every month and old minor versions stop receiving them:
+  # follow the releases and raise this tag regularly (https://github.com/traefik/traefik/releases).
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.7.13
     container_name: ${PROJECT_NAME}-edge-traefik
     restart: unless-stopped
     
     # Traefik CLI configuration arguments
     command:
-      # Provider settings: Dynamic auto-discovery of local Docker containers
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false" # Security: Requires explicit 'traefik.enable=true' label on containers
-      - "--providers.docker.network=${PROJECT_NAME}-edge"
+      # NO Docker provider. Traefik used to discover routes by reading container labels through the Docker
+      # socket: whoever compromised this INTERNET-FACING container could then drive the Docker daemon of the host
+      # (start a privileged container, read the files of the machine...) and read every container's environment,
+      # secrets included. Routes now come from files (traefik-dynamic/), so Traefik has no Docker access at all.
+
+      # Never phone home (anonymous usage statistics, update check).
+      - "--global.checknewversion=false"
+      - "--global.sendanonymoususage=false"
 
       # Entrypoints setup: Defining standard web ports
       - "--entrypoints.web.address=:80"
@@ -79,9 +86,15 @@ services:
       
     volumes:
       - traefik_certs:/letsencrypt                  # Mounts persistent volume for certificates
-      - ./traefik-dynamic:/etc/traefik/dynamic:ro   # Routes publiques optionnelles (voir ci-dessus)
-      - /var/run/docker.sock:/var/run/docker.sock:ro # Read-only access to Docker socket for container discovery
+      - ./traefik-dynamic:/etc/traefik/dynamic:ro   # Routes (demo, production, optional ones), read-only
       
+    # Read by the route files in traefik-dynamic/ (Go templates: {{ env "NAME" }}). A route whose domain is empty
+    # is simply not created, so one edge serves the demo, the production, or both.
+    environment:
+      PROJECT_NAME: ${PROJECT_NAME}
+      DEMO_DOMAIN: ${DEMO_DOMAIN:-}
+      PROD_DOMAIN: ${PROD_DOMAIN:-}
+
     networks:
       - edge
 

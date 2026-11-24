@@ -10,6 +10,7 @@
     "overrides": {
       "deepmerge-ts": ">=8.0.0",
       "mysql2": ">=3.22.0",
+      "effect": "^3.22.1",
       "handlebars@<4.7.10": "^4.7.10",
       "proxy-addr@<2.0.8": "^2.0.8",
       "multer@<2.5.0": "^2.5.0",
@@ -48,7 +49,7 @@
     "test:e2e:migrate": "cross-env NODE_ENV=test prisma migrate deploy",
     "test:scripts": "node --test scripts/pr-check.test.mjs scripts/list-features.test.mjs scripts/new-feature.test.mjs",
     "feature:new": "node scripts/new-feature.mjs",
-    "security:rotate-key": "ts-node prisma/rotate-encryption-key.ts",
+    "security:rotate-key": "node dist/src/tools/rotate-key/cli.js",
     "prisma:reset": "prisma migrate reset --force && prisma db seed && prisma generate",
     "sys:reset": "docker compose down -v && docker compose up -d --wait && pnpm prisma:reset"
   },

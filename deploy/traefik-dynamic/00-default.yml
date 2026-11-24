@@ -1,5 +1,28 @@
 # Directory monitored by Traefik (file provider, see docker-compose.edge.yml).
-# Empty by default: no additional routes are published. To expose a generated backend
-# (e.g., the API of a portfolio hosted elsewhere), copy ../traefik-generated-gateway.example.yml
-# here under a different name (e.g., generated-gateway.yml) and replace the domain.
-http: {}
+#
+#   00-default.yml        TLS rules and security headers shared by every public route (this file)
+#   10-demo.yml           the public demo        (active when DEMO_DOMAIN is set)
+#   20-production.yml     the public production  (active when PROD_DOMAIN is set)
+#   anything else         optional routes, e.g. copy ../traefik-generated-gateway.example.yml here under another
+#                         name to expose ONE generated backend.
+
+tls:
+  options:
+    default:
+      # TLS 1.0 and 1.1 are obsolete. sniStrict refuses a connection whose requested name matches none of our
+      # certificates, instead of answering with a default certificate: a scan of the bare IP address learns nothing.
+      minVersion: VersionTLS12
+      sniStrict: true
+
+http:
+  middlewares:
+    secure-headers:
+      headers:
+        stsSeconds: 31536000          # the browser must use HTTPS for this domain for a year
+        stsIncludeSubdomains: false
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: no-referrer
+        customResponseHeaders:
+          Server: ""                  # do not advertise the proxy
+          X-Powered-By: ""

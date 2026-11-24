@@ -73,7 +73,7 @@ Each deployment mode is a separate **Docker Compose stack**. Stacks never share 
 
 **Why they don't collide on one machine.** `demo` and `prod` share one Traefik but are told apart by **domain name**, not by port. `dev`, `local` and `lan` have no domain and are reachable on their own port: if you run several of them, give each a different port (see [Dev, Local or LAN?](#4-dev-local-or-lan)).
 
-**Docker access.** Only the stacks that can generate backends (`local`, `lan`, `prod`) ship their own **`docker-socket-proxy`**, on a private network. `edge` and `demo` have none and cannot reach another stack's proxy. In `dev`, the API on your machine talks to your own Docker daemon directly.
+**Docker access.** Only the stacks that can generate backends (`local`, `lan`, `prod`) ship their own **`docker-socket-proxy`**, on a private network. `edge` and `demo` have none and cannot reach another stack's proxy. **Traefik (`edge`) has no access to the Docker daemon at all**: its routes are declared in files (`deploy/traefik-dynamic/10-demo.yml`, `20-production.yml`), not discovered through container labels and the Docker socket. A compromised public proxy therefore cannot start containers or read the secrets of the other stacks. In `dev`, the API on your machine talks to your own Docker daemon directly.
 
 ---
 
@@ -138,7 +138,7 @@ Use **different** secrets in every stack: never copy the ones of one environment
 
 ### Rename the project in one place
 
-`PROJECT_NAME`, at the top of each `.env*` file, drives container names, Docker networks and volumes, Traefik labels, the Redis lock prefix (`SERVER_NAME`) and the issuer shown in authenticator apps.
+`PROJECT_NAME`, at the top of each `.env*` file, drives container names, Docker networks and volumes, the container names Traefik routes to (`deploy/traefik-dynamic/`), the Redis lock prefix (`SERVER_NAME`) and the issuer shown in authenticator apps.
 
 The only names that do **not** follow it are the **generated backends**: their containers are always `backos-gen-<slug>` and their images `backos-gen/<slug>`.
 

@@ -34,7 +34,7 @@ export class CryptoService {
 
     // KEY ROTATION (step 2): `ENCRYPTION_KEY_PREVIOUS` is optional. While it is set, data written with
     // the old key stays readable (decrypt falls back to it) and new data is written with the current
-    // key; `prisma/rotate-encryption-key.ts` then re-encrypts what is left, after which the variable
+    // key; `src/tools/rotate-key/cli.ts` then re-encrypts what is left, after which the variable
     // can be removed. Nothing about the stored formats changes.
     private readonly currentKeyHex: string;
     private readonly previousKeyHex: string | null;
